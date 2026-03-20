@@ -1,0 +1,130 @@
+{
+  "theme": "Surgical Precision (Dark & Light Hybrid)",
+  "typography": {
+    "primary_font": "Manrope",
+    "secondary_font": "Work Sans",
+    "rules": [
+      "NO Inter for headings.",
+      "Headlines MUST use tracking-tight equivalent in React Native (letterSpacing: -0.5 to -1).",
+      "Overlines/Labels MUST be Uppercase + Tiny (10-12px) + Wide Spacing (letterSpacing: 1.5).",
+      "Minimum body text size 16px for readability.",
+      "Use explicit font weights (e.g., '300' for elegant light, '800' for impact) rather than relying strictly on 'bold'."
+    ]
+  },
+  "colors": {
+    "light": {
+      "background": "#F9FAFB",
+      "surface": "#FFFFFF",
+      "primary": "#0033A0",
+      "secondary": "#7A8BFF",
+      "text_primary": "#0A0A0A",
+      "text_secondary": "#52525B",
+      "border": "#E4E4E7",
+      "success": "#10B981",
+      "error": "#EF4444"
+    },
+    "dark": {
+      "background": "#05050A",
+      "surface": "#12121A",
+      "primary": "#4A72FF",
+      "secondary": "#2A2A3A",
+      "text_primary": "#FFFFFF",
+      "text_secondary": "#A0A0AB",
+      "border": "#27272A",
+      "success": "#059669",
+      "error": "#F87171"
+    }
+  },
+  "spacing_and_layout": {
+    "base_unit": 8,
+    "scale": [4, 8, 12, 16, 24, 32, 48, 64],
+    "rules": [
+      "Generous Spacing Philosophy: Use 2-3x more spacing than typical mobile apps.",
+      "Padding inside cards must be at least 16px to 24px to prevent data collision.",
+      "Mobile-First Responsive: Ensure safe area insets are respected using react-native-safe-area-context.",
+      "Optical alignment over geometrical alignment.",
+      "Do NOT center align everything. Medical data should be strictly left-aligned for scannability."
+    ]
+  },
+  "components": {
+    "buttons": {
+      "primary": "Pill-shaped (borderRadius: 9999) with Bio-Cobalt background and stark white text. No soft drop shadows.",
+      "secondary": "Sharp rectangular (borderRadius: 4) with 1px border. Used for medical actions."
+    },
+    "cards": {
+      "style": "The 'Grid Borders' tech look. 1px solid border with NO shadow in dark mode, extremely subtle 4px blur shadow in light mode. Medical records should look like physical lab reports.",
+      "radius": "Small (borderRadius: 6 or 8) - avoid overly bubbly rounded corners."
+    },
+    "inputs": {
+      "style": "High contrast, 1px border. Label must be outside the input, NOT floating. Focus state must change border to primary color."
+    },
+    "security_visuals": {
+      "e2ee_badge": "A small pill badge at the top of the consultation screen. Background: dark green/black mix. Text: bright green. Icon: Lock. Indicates local-first encryption.",
+      "simulated_stt": "When recording, show a subtle pulsing waveform or a glowing mic icon (using React Native Animated API)."
+    }
+  },
+  "motion": {
+    "rules": [
+      "Use React Native 'Animated' or 'react-native-reanimated' for smooth state changes.",
+      "Add scale-down on press for buttons (transform: [{ scale: 0.98 }]).",
+      "Entrance animations for lists: Staggered fade and slide up.",
+      "Simulated STT transcript should appear to type out smoothly or slide in as chunks."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "WCAG 2.1 AA Compliance. Ensure contrast ratio is > 4.5:1.",
+      "Support dynamic type/adjusting text sizes.",
+      "All interactive elements MUST have 'accessible={true}' and appropriate 'accessibilityLabel' or 'accessibilityRole'."
+    ]
+  },
+  "media": {
+    "libraries": ["expo-av", "react-native-svg"]
+  },
+  "icons_and_assets": {
+    "library": "lucide-react-native",
+    "instructions": "Use clean, stroke-based icons. For dense medical data, use 16px or 20px icons."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.pexels.com/photos/6762862/pexels-photo-6762862.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Serious male doctor in white coat",
+      "category": "patient_avatar_or_doctor_profile"
+    },
+    {
+      "url": "https://images.pexels.com/photos/5998465/pexels-photo-5998465.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Professional female doctor",
+      "category": "doctor_profile"
+    },
+    {
+      "url": "https://images.pexels.com/photos/7605372/pexels-photo-7605372.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Abstract blue blurred gradient",
+      "category": "auth_background"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1758532843609-43d98fa8c23f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwYWJzdHJhY3QlMjB0ZXh0dXJlJTIwbWluaW1hbGlzdHxlbnwwfHx8fDE3NzQwMzg2NjR8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Calm water texture",
+      "category": "texture_overlay"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "CRITICAL: This is a React Native Expo application. DO NOT use HTML elements (div, span, p) or CSS files like tailwind.",
+    "CRITICAL: All styling MUST be done using 'StyleSheet.create' from 'react-native'.",
+    "CRITICAL: Avoid generic rounded UI. Apply the 'Surgical Precision' theme - sharp, highly legible, left-aligned data.",
+    "CRITICAL: Implement the simulated STT with a local state array that updates sequentially to mimic real-time transcription.",
+    "CRITICAL: Add E2EE visual cues (Lock icons, 'End-to-End Encrypted' text) to patient records and consultation screens.",
+    "CRITICAL: Use 'lucide-react-native' for icons. No AI emojis.",
+    "CRITICAL: For JSON/PDF generation, implement the UI for the prescription preview and mock functions for export.",
+    "CRITICAL: Ensure the UI conveys a 'Local-First' and HIPAA compliant architecture.",
+    "CRITICAL: Do NOT use complete transparent backgrounds for overlays that have content underneath."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Don't make generic centered layouts. Left-align dense content. Create depth through layered design elements.",
+    "Every interaction needs micro-animations. Use React Native's Pressable with conditionally applied opacity or scale.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Never use generic AI emojis for icons. Use lucide-react-native.",
+    "All interactive and key informational elements MUST include a 'testID' attribute in React Native for testing (e.g., testID='login-form-submit-button').",
+    "GENERAL UI UX DESIGN GUIDELINES: Maintain clear visual hierarchy, keep navigation predictable, provide immediate visual feedback on touch, and prioritize content legibility."
+  ]
+}
