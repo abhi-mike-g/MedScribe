@@ -1,12 +1,12 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Form, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os, logging, uuid, io, json, hashlib, re, random, string
+import os, logging, uuid, io, json, hashlib, re, random, string, base64, tempfile, asyncio, shutil
 from pathlib import Path
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import jwt, bcrypt
 from reportlab.lib.pagesizes import letter
@@ -14,6 +14,9 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -28,9 +31,28 @@ api_router = APIRouter(prefix="/api")
 JWT_SECRET = os.environ.get('JWT_SECRET', str(uuid.uuid4()))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+# Upload & encrypted storage directories
+UPLOAD_DIR = ROOT_DIR / "uploads"
+ENCRYPTED_DIR = ROOT_DIR / "encrypted_storage"
+UPLOAD_DIR.mkdir(exist_ok=True)
+ENCRYPTED_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Whisper model - lazy loaded
+_whisper_model = None
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        logger.info("Loading Whisper model (tiny)...")
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        logger.info("Whisper model loaded.")
+    return _whisper_model
 
 # ============== HELPERS ==============
 
@@ -118,6 +140,7 @@ class UserLogin(BaseModel):
 class CaseSubmit(BaseModel):
     transcript: str
     chief_complaint: str = ""
+    extraction_data: Optional[dict] = None
 
 class DoctorResponse(BaseModel):
     response_type: str  # "remedy", "prescription", "visit"
@@ -212,6 +235,7 @@ async def submit_case(data: CaseSubmit, user=Depends(require_role("patient"))):
         "patient_name": user["name"], "patient_age": user.get("age", 0),
         "patient_gender": user.get("gender", ""),
         "transcript": data.transcript, "chief_complaint": data.chief_complaint,
+        "extraction_data": data.extraction_data,
         "status": "pending",  # pending -> assigned -> responded
         "assigned_doctor_id": None, "doctor_response": None,
         "prescription_id": None,
@@ -444,6 +468,342 @@ async def get_dashboard_stats(user=Depends(get_current_user)):
     else:
         return await admin_stats(user)
 
+# ============== AUDIO TRANSCRIPTION & AI EXTRACTION ==============
+
+async def run_whisper_transcription(audio_path: str) -> dict:
+    """Run Whisper STT in a thread pool to avoid blocking the event loop."""
+    def _transcribe():
+        model = get_whisper_model()
+        segments, info = model.transcribe(audio_path, beam_size=5, language="en")
+        text_parts = []
+        segment_data = []
+        for seg in segments:
+            text_parts.append(seg.text.strip())
+            segment_data.append({
+                "start": round(seg.start, 2),
+                "end": round(seg.end, 2),
+                "text": seg.text.strip(),
+            })
+        return {
+            "transcript": " ".join(text_parts),
+            "segments": segment_data,
+            "language": info.language,
+            "language_probability": round(info.language_probability, 3),
+            "duration": round(info.duration, 2),
+        }
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _transcribe)
+
+async def run_llm_extraction(transcript: str) -> dict:
+    """Use LLM to extract structured medical data from a transcript."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"medscribe-extract-{uuid.uuid4().hex[:8]}",
+        system_message="""You are MedScribe AI, a medical transcript analyzer. 
+Given a doctor-patient conversation transcript, extract structured medical information.
+Return ONLY valid JSON with this exact schema (no markdown, no code fences):
+{
+  "chief_complaint": "Brief primary complaint",
+  "symptoms": [{"name": "symptom", "severity": "mild/moderate/severe", "duration": "how long", "notes": "extra detail"}],
+  "medical_history_mentioned": ["any past conditions mentioned"],
+  "medications_mentioned": ["any medications the patient says they take"],
+  "allergies_mentioned": ["any allergies mentioned"],
+  "vital_signs_mentioned": {"temperature": "", "blood_pressure": "", "heart_rate": "", "other": ""},
+  "suggested_diagnosis": ["possible diagnoses based on symptoms"],
+  "recommended_tests": ["suggested diagnostic tests"],
+  "urgency_level": "low/medium/high/critical",
+  "key_quotes": ["important verbatim quotes from the conversation"],
+  "summary": "2-3 sentence clinical summary of the conversation"
+}
+If a field has no data, use empty string or empty array. Always return valid JSON."""
+    ).with_model("openai", "gpt-4.1-mini")
+
+    user_message = UserMessage(
+        text=f"Extract structured medical information from this doctor-patient conversation transcript:\n\n{transcript}"
+    )
+    response_text = await chat.send_message(user_message)
+
+    # Parse LLM response - handle potential markdown wrapping
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+    if cleaned.startswith("json"):
+        cleaned = cleaned[4:].strip()
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.warning(f"LLM returned non-JSON: {response_text[:200]}")
+        return {
+            "chief_complaint": "Unable to parse - see raw transcript",
+            "symptoms": [],
+            "medical_history_mentioned": [],
+            "medications_mentioned": [],
+            "allergies_mentioned": [],
+            "vital_signs_mentioned": {},
+            "suggested_diagnosis": [],
+            "recommended_tests": [],
+            "urgency_level": "medium",
+            "key_quotes": [],
+            "summary": response_text[:500],
+            "raw_llm_response": response_text,
+        }
+
+@api_router.post("/audio/transcribe")
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    """Upload audio file, transcribe with Whisper, extract medical data with LLM."""
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="No audio file provided")
+
+    # Save uploaded audio to temp file
+    suffix = Path(audio.filename).suffix or ".webm"
+    tmp_path = UPLOAD_DIR / f"audio_{uuid.uuid4().hex}{suffix}"
+    try:
+        content = await audio.read()
+        if len(content) < 100:
+            raise HTTPException(status_code=400, detail="Audio file too small")
+        with open(tmp_path, "wb") as f:
+            f.write(content)
+
+        # Step 1: Transcribe with Whisper
+        logger.info(f"Transcribing audio: {tmp_path.name} ({len(content)} bytes)")
+        stt_result = await run_whisper_transcription(str(tmp_path))
+
+        if not stt_result["transcript"].strip():
+            return {
+                "transcript": "",
+                "stt": stt_result,
+                "extraction": None,
+                "message": "No speech detected in the audio.",
+                "processing_method": "whisper-tiny-server"
+            }
+
+        # Step 2: Extract structured medical data with LLM
+        logger.info(f"Running LLM extraction on transcript ({len(stt_result['transcript'])} chars)")
+        extraction = await run_llm_extraction(stt_result["transcript"])
+
+        return {
+            "transcript": stt_result["transcript"],
+            "stt": {
+                "segments": stt_result["segments"],
+                "language": stt_result["language"],
+                "confidence": stt_result["language_probability"],
+                "duration_seconds": stt_result["duration"],
+                "model": "whisper-tiny",
+                "processing_method": "faster-whisper-server"
+            },
+            "extraction": extraction,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+@api_router.post("/audio/extract-from-text")
+async def extract_from_text(
+    data: dict,
+    user=Depends(get_current_user)
+):
+    """Extract structured medical data from an already-transcribed text."""
+    transcript = data.get("transcript", "")
+    if not transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcript text is required")
+    extraction = await run_llm_extraction(transcript)
+    return {"extraction": extraction}
+
+# ============== E2EE KEY MANAGEMENT ==============
+
+@api_router.post("/e2ee/register-public-key")
+async def register_public_key(data: dict, user=Depends(get_current_user)):
+    """Store user's public key for E2EE. The private key NEVER leaves the device
+    (stored in Android Keystore / iOS Keychain)."""
+    public_key_pem = data.get("public_key")
+    if not public_key_pem:
+        raise HTTPException(status_code=400, detail="public_key is required")
+
+    # Validate it's a real PEM public key
+    try:
+        serialization.load_pem_public_key(public_key_pem.encode())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid PEM public key format")
+
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "e2ee_public_key": public_key_pem,
+            "e2ee_key_registered_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"status": "ok", "message": "Public key registered for E2EE"}
+
+@api_router.get("/e2ee/public-key/{user_id}")
+async def get_public_key(user_id: str, user=Depends(get_current_user)):
+    """Get another user's public key for encrypting data to them."""
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "e2ee_public_key": 1, "name": 1, "role": 1})
+    if not target or not target.get("e2ee_public_key"):
+        raise HTTPException(status_code=404, detail="User has no registered E2EE public key")
+    return {
+        "user_id": user_id,
+        "public_key": target["e2ee_public_key"],
+        "name": target.get("name"),
+        "role": target.get("role"),
+    }
+
+@api_router.post("/e2ee/exchange-key")
+async def exchange_encrypted_key(data: dict, user=Depends(get_current_user)):
+    """Store an encrypted symmetric key for a specific recipient.
+    The sender encrypts an AES key with the recipient's public key.
+    Only the recipient can decrypt it with their private key from Keystore."""
+    recipient_id = data.get("recipient_id")
+    encrypted_aes_key = data.get("encrypted_aes_key")  # base64-encoded
+    context_id = data.get("context_id")  # case_id or prescription_id
+
+    if not all([recipient_id, encrypted_aes_key, context_id]):
+        raise HTTPException(status_code=400, detail="recipient_id, encrypted_aes_key, and context_id required")
+
+    key_exchange_doc = {
+        "id": str(uuid.uuid4()),
+        "sender_id": user["id"],
+        "recipient_id": recipient_id,
+        "context_id": context_id,
+        "encrypted_aes_key": encrypted_aes_key,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.key_exchanges.insert_one(key_exchange_doc)
+    return {"status": "ok", "exchange_id": key_exchange_doc["id"]}
+
+@api_router.get("/e2ee/keys-for-me")
+async def get_my_key_exchanges(context_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Get encrypted AES keys sent to me. I decrypt them with my private key from Keystore."""
+    q: dict = {"recipient_id": user["id"]}
+    if context_id:
+        q["context_id"] = context_id
+    exchanges = await db.key_exchanges.find(q, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return exchanges
+
+# ============== ENCRYPTED FILE ATTACHMENTS ==============
+
+@api_router.post("/attachments/upload")
+async def upload_encrypted_attachment(
+    encrypted_data: UploadFile = File(...),
+    case_id: str = Form(...),
+    file_name: str = Form("attachment"),
+    file_type: str = Form("application/octet-stream"),
+    iv: str = Form(...),  # base64-encoded AES-GCM IV
+    sender_id: str = Form(""),
+    user=Depends(get_current_user)
+):
+    """Upload a client-side encrypted file. The file arrives already encrypted with AES-256-GCM.
+    The AES key is exchanged via /e2ee/exchange-key. We store the ciphertext as-is."""
+    content = await encrypted_data.read()
+    if len(content) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
+    attachment_id = str(uuid.uuid4())
+    storage_path = ENCRYPTED_DIR / f"{attachment_id}.enc"
+
+    with open(storage_path, "wb") as f:
+        f.write(content)
+
+    attachment_doc = {
+        "id": attachment_id,
+        "case_id": case_id,
+        "uploader_id": user["id"],
+        "uploader_name": user["name"],
+        "uploader_role": user["role"],
+        "original_file_name": file_name,
+        "file_type": file_type,
+        "file_size": len(content),
+        "iv": iv,
+        "encrypted": True,
+        "encryption_method": "AES-256-GCM",
+        "storage_path": str(storage_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.attachments.insert_one(attachment_doc)
+
+    # Link attachment to the case
+    await db.cases.update_one(
+        {"id": case_id},
+        {"$push": {"attachment_ids": attachment_id}}
+    )
+
+    return {
+        "id": attachment_id,
+        "file_name": file_name,
+        "file_size": len(content),
+        "encrypted": True,
+        "encryption_method": "AES-256-GCM",
+    }
+
+@api_router.get("/attachments/{attachment_id}")
+async def get_attachment_metadata(attachment_id: str, user=Depends(get_current_user)):
+    """Get metadata for an encrypted attachment (not the file itself)."""
+    att = await db.attachments.find_one({"id": attachment_id}, {"_id": 0, "storage_path": 0})
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    # Access control
+    case = await db.cases.find_one({"id": att["case_id"]}, {"_id": 0})
+    if not case:
+        raise HTTPException(status_code=404, detail="Associated case not found")
+    if user["role"] == "patient" and case.get("patient_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if user["role"] == "doctor" and case.get("assigned_doctor_id") and case["assigned_doctor_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return att
+
+@api_router.get("/attachments/{attachment_id}/download")
+async def download_encrypted_attachment(attachment_id: str, user=Depends(get_current_user)):
+    """Download the raw encrypted file. Client must decrypt with the AES key from Keystore."""
+    att = await db.attachments.find_one({"id": attachment_id}, {"_id": 0})
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    # Access control
+    case = await db.cases.find_one({"id": att["case_id"]}, {"_id": 0})
+    if not case:
+        raise HTTPException(status_code=404, detail="Associated case not found")
+    if user["role"] == "patient" and case.get("patient_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    storage_path = Path(att["storage_path"])
+    if not storage_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on server")
+
+    return StreamingResponse(
+        open(storage_path, "rb"),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename={att['original_file_name']}.enc",
+            "X-Encryption-Method": "AES-256-GCM",
+            "X-Encryption-IV": att["iv"],
+        }
+    )
+
+@api_router.get("/attachments/case/{case_id}")
+async def get_case_attachments(case_id: str, user=Depends(get_current_user)):
+    """List all encrypted attachments for a case."""
+    case = await db.cases.find_one({"id": case_id}, {"_id": 0})
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if user["role"] == "patient" and case.get("patient_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    attachments = await db.attachments.find(
+        {"case_id": case_id},
+        {"_id": 0, "storage_path": 0}
+    ).sort("created_at", -1).to_list(50)
+    return attachments
 @api_router.get("/health")
 async def health_check():
     return {"status": "healthy", "encryption": "AES-256-GCM", "compliance": ["HIPAA", "GDPR"], "roles": ["doctor", "patient", "admin"]}

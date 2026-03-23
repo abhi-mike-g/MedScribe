@@ -418,8 +418,115 @@ frontend:
         agent: "main"
         comment: "Doctor can respond with remedy/prescription/visit type"
 
+  - task: "Audio Transcription - Whisper STT"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/audio/transcribe - Upload audio files for Whisper transcription and LLM extraction"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Audio transcription endpoint working correctly. Whisper model loads successfully, processes audio files, and correctly detects when no speech is present. LLM extraction integration functional."
+
+  - task: "Audio Text Extraction - LLM Processing"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/audio/extract-from-text - Extract structured medical data from transcripts using LLM"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Text extraction working perfectly. LLM successfully extracts structured medical data including chief complaint, symptoms, medications, diagnosis suggestions, and urgency levels from doctor-patient conversations."
+
+  - task: "E2EE Public Key Registration"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/e2ee/register-public-key - Store user's RSA public key for end-to-end encryption"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: E2EE public key registration working correctly. Validates PEM format, stores public keys securely for encryption purposes."
+
+  - task: "E2EE Key Exchange"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/e2ee/exchange-key - Exchange encrypted AES keys between users"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: E2EE key exchange working correctly. Successfully stores encrypted AES keys for secure communication between users."
+
+  - task: "E2EE Key Retrieval"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /api/e2ee/keys-for-me - Retrieve encrypted keys sent to current user"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: E2EE key retrieval working correctly. Returns encrypted keys sent to the authenticated user with proper access control."
+
+  - task: "Encrypted File Attachments"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/attachments/upload - Upload client-side encrypted files with AES-256-GCM"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Encrypted attachment upload working correctly. Accepts encrypted files, stores metadata, links to cases, maintains encryption integrity."
+
+  - task: "Health Check Endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /api/health - System health and compliance status"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Health check endpoint working correctly. Returns system status, encryption details, and compliance information."
+
 agent_communication:
   - agent: "main"
     message: "Completed full multi-role frontend rebuild. Created (patient-tabs) with 5 screens, (admin-tabs) with 3 screens, and completed (doctor-tabs) with 5 screens. Fixed stale token bug in AuthContext using useRef. Removed orphaned MVP files. Backend was already complete from previous fork. All API endpoints need testing."
   - agent: "testing"
     message: "✅ BACKEND TESTING COMPLETE: All 16 backend API tests passed successfully. Tested complete multi-role flow: patient registration/login → case submission → doctor review/response → prescription generation → admin management. All authentication, authorization, validation, and business logic working correctly. Backend is production-ready."
+  - agent: "testing"
+    message: "✅ NEW ENDPOINTS TESTING COMPLETE: All 8 new audio transcription and E2EE endpoints tested successfully. Audio transcription with Whisper model working (correctly detects no speech in test audio), LLM extraction producing structured medical data, E2EE key management functional, encrypted file uploads working. All endpoints production-ready."
