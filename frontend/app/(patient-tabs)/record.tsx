@@ -1,16 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Animated, TextInput, Platform, Alert, KeyboardAvoidingView } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Animated, TextInput, Platform, Alert, KeyboardAvoidingView, Modal, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 import { useAuth } from '../../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
-import { Mic, MicOff, Lock, Cpu, Square, Edit3, Globe, Smartphone, Clock, BarChart3, Send, CheckCircle, AlertTriangle, Stethoscope, Pill, Activity, FileText, Brain, Thermometer, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { Mic, MicOff, Lock, Cpu, Square, Edit3, Clock, BarChart3, Send, CheckCircle, AlertTriangle, Stethoscope, Pill, Activity, FileText, Brain, Thermometer, ChevronDown, ChevronUp, Globe, Languages, RefreshCw } from 'lucide-react-native';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 type Step = 'ready' | 'recording' | 'uploading' | 'transcribing' | 'extracting' | 'review' | 'submitting' | 'done';
+
+interface LanguageOption {
+  code: string;
+  name: string;
+  flag: string;
+  whisper_code: string | null;
+}
 
 interface MedicalExtraction {
   chief_complaint: string;
@@ -41,6 +48,20 @@ export default function PatientRecordScreen() {
   const [extraction, setExtraction] = useState<MedicalExtraction | null>(null);
   const [sttInfo, setSttInfo] = useState<any>(null);
   const [error, setError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastAudioUri, setLastAudioUri] = useState<string | null>(null);
+
+  // Language selection
+  const [languages, setLanguages] = useState<LanguageOption[]>([
+    { code: 'auto', name: 'Auto-detect', flag: '🌐', whisper_code: null },
+    { code: 'en', name: 'English', flag: '🇬🇧', whisper_code: 'en' },
+    { code: 'hi', name: 'Hindi', flag: '🇮🇳', whisper_code: 'hi' },
+  ]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('auto');
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false);
+  const [whisperModel, setWhisperModel] = useState('base');
+
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     symptoms: true, diagnosis: true, medications: false, history: false, vitals: false, tests: false, quotes: false
   });
@@ -51,7 +72,11 @@ export default function PatientRecordScreen() {
   const tokenRef = useRef(token);
   useEffect(() => { tokenRef.current = token; }, [token]);
 
-  useEffect(() => { requestMicPermission(); }, []);
+  // Fetch supported languages from backend on mount
+  useFocusEffect(useCallback(() => {
+    fetchLanguages();
+    requestMicPermission();
+  }, []));
 
   useEffect(() => {
     if (recording) {
@@ -68,16 +93,35 @@ export default function PatientRecordScreen() {
     }
   }, [recording]);
 
+  const fetchLanguages = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/languages`);
+      if (res.ok) {
+        const data = await res.json();
+        setLanguages(data.languages);
+        setWhisperModel(data.whisper_model || 'base');
+      }
+    } catch (e) {
+      console.warn('Failed to fetch languages, using defaults:', e);
+    }
+  };
+
   const requestMicPermission = async () => {
     try {
       if (Platform.OS === 'web') { setPermissionGranted(true); return; }
       const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       setPermissionGranted(granted);
-      if (!granted) Alert.alert('Microphone Permission', 'Microphone access is required.');
+      if (!granted) {
+        Alert.alert(
+          'Microphone Permission Required',
+          'MedScribe needs microphone access to record doctor-patient conversations. Please grant permission in Settings.',
+          [{ text: 'OK' }]
+        );
+      }
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
     } catch (e) {
       console.warn('Permission request failed:', e);
-      setPermissionGranted(true);
+      setPermissionGranted(true); // Assume granted for web fallback
     }
   };
 
@@ -87,8 +131,11 @@ export default function PatientRecordScreen() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const selectedLangInfo = languages.find(l => l.code === selectedLanguage) || languages[0];
+
   const startRecording = async () => {
     setError('');
+    setRetryCount(0);
     try {
       await recorder.prepareToRecordAsync();
       recorder.record();
@@ -96,9 +143,12 @@ export default function PatientRecordScreen() {
       setStep('recording');
       setRecordingDuration(0);
       timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Recording start failed:', err);
-      setError('Failed to start recording. Please check microphone permissions.');
+      if (Platform.OS !== 'web') {
+        Alert.alert('Recording Failed', 'Could not start recording. Please ensure microphone permission is granted and try again.');
+      }
+      setError('Failed to start recording. Check microphone permissions.');
       setStep('ready');
     }
   };
@@ -111,40 +161,60 @@ export default function PatientRecordScreen() {
       await recorder.stop();
       const uri = recorder.uri;
       if (uri) {
+        setLastAudioUri(uri);
         await uploadAndTranscribe(uri);
       } else {
-        setError('No audio file produced. Please try again.');
+        setError('No audio file produced. Please try recording again.');
         setStep('ready');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Recording stop failed:', err);
-      setError('Failed to stop recording properly.');
+      setError('Failed to stop recording. Please try again.');
       setStep('ready');
     }
   };
 
-  const uploadAndTranscribe = async (audioUri: string) => {
-    setStep('transcribing');
+  const uploadAndTranscribe = async (audioUri: string, attempt: number = 1) => {
+    const MAX_RETRIES = 3;
+    setStep('uploading');
+    setUploadProgress(0);
+
     try {
       const formData = new FormData();
 
       if (Platform.OS === 'web') {
-        // Web: fetch the blob from the URI
+        // Web: fetch the blob from the recorder URI
         const response = await fetch(audioUri);
         const blob = await response.blob();
         formData.append('audio', blob, 'recording.webm');
       } else {
-        // Native: use the file URI directly
+        // Android/iOS: use the native file URI
         const fileInfo = await FileSystem.getInfoAsync(audioUri);
         if (!fileInfo.exists) {
-          throw new Error('Audio file not found');
+          throw new Error('Audio file not found on device');
         }
+        // Determine file extension from URI
+        const extension = audioUri.split('.').pop() || 'm4a';
+        const mimeType = extension === 'webm' ? 'audio/webm' :
+                         extension === 'wav' ? 'audio/wav' :
+                         extension === 'mp3' ? 'audio/mpeg' :
+                         extension === 'caf' ? 'audio/x-caf' :
+                         'audio/m4a';
         formData.append('audio', {
           uri: audioUri,
-          type: 'audio/m4a',
-          name: 'recording.m4a',
+          type: mimeType,
+          name: `recording.${extension}`,
         } as any);
       }
+
+      // Add language selection
+      formData.append('language', selectedLanguage);
+
+      setStep('transcribing');
+      setUploadProgress(50);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000); // 2 min timeout for mobile
 
       const res = await fetch(`${BACKEND_URL}/api/audio/transcribe`, {
         method: 'POST',
@@ -152,14 +222,19 @@ export default function PatientRecordScreen() {
           'Authorization': `Bearer ${tokenRef.current}`,
         },
         body: formData,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeout);
+      setUploadProgress(80);
+
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: 'Transcription failed' }));
-        throw new Error(errData.detail || 'Transcription failed');
+        const errData = await res.json().catch(() => ({ detail: 'Server error' }));
+        throw new Error(errData.detail || `Server returned ${res.status}`);
       }
 
       const data = await res.json();
+      setUploadProgress(100);
       setTranscript(data.transcript || '');
       setEditedTranscript(data.transcript || '');
       setSttInfo(data.stt);
@@ -169,21 +244,43 @@ export default function PatientRecordScreen() {
         setChiefComplaint(data.extraction.chief_complaint || '');
         setStep('review');
       } else if (data.transcript) {
-        // Transcript exists but no extraction — run extraction separately
         setStep('extracting');
-        await runExtraction(data.transcript);
+        await runExtraction(data.transcript, data.stt?.language || selectedLanguage);
       } else {
-        setError('No speech detected in the recording. Please try again.');
+        setError('No speech detected. Please speak clearly and try again.');
         setStep('ready');
       }
     } catch (e: any) {
-      console.error('Upload/transcribe failed:', e);
-      setError(e.message || 'Failed to transcribe audio. Please try again.');
+      console.error(`Upload attempt ${attempt} failed:`, e);
+
+      if (e.name === 'AbortError') {
+        if (attempt < MAX_RETRIES) {
+          setRetryCount(attempt);
+          setError(`Upload timed out. Retrying (${attempt}/${MAX_RETRIES})...`);
+          await uploadAndTranscribe(audioUri, attempt + 1);
+          return;
+        }
+        setError('Upload timed out after multiple attempts. Please check your internet connection and try again.');
+      } else if (attempt < MAX_RETRIES && (e.message?.includes('Network') || e.message?.includes('fetch'))) {
+        setRetryCount(attempt);
+        setError(`Network error. Retrying (${attempt}/${MAX_RETRIES})...`);
+        await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+        await uploadAndTranscribe(audioUri, attempt + 1);
+        return;
+      } else {
+        setError(e.message || 'Failed to transcribe. Please try again.');
+      }
       setStep('ready');
     }
   };
 
-  const runExtraction = async (text: string) => {
+  const retryUpload = () => {
+    if (lastAudioUri) {
+      uploadAndTranscribe(lastAudioUri);
+    }
+  };
+
+  const runExtraction = async (text: string, lang: string = 'en') => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/audio/extract-from-text`, {
         method: 'POST',
@@ -191,7 +288,7 @@ export default function PatientRecordScreen() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${tokenRef.current}`,
         },
-        body: JSON.stringify({ transcript: text }),
+        body: JSON.stringify({ transcript: text, language: lang }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -201,7 +298,7 @@ export default function PatientRecordScreen() {
       setStep('review');
     } catch (e) {
       console.error('Extraction failed:', e);
-      setStep('review'); // Still show transcript even if extraction fails
+      setStep('review');
     }
   };
 
@@ -209,10 +306,9 @@ export default function PatientRecordScreen() {
   const saveEdit = async () => {
     setTranscript(editedTranscript);
     setIsEditing(false);
-    // Re-run extraction on edited transcript
     if (editedTranscript !== transcript) {
       setStep('extracting');
-      await runExtraction(editedTranscript);
+      await runExtraction(editedTranscript, sttInfo?.language || selectedLanguage);
     }
   };
   const cancelEdit = () => { setEditedTranscript(transcript); setIsEditing(false); };
@@ -260,6 +356,9 @@ export default function PatientRecordScreen() {
     setSttInfo(null);
     setRecordingDuration(0);
     setError('');
+    setUploadProgress(0);
+    setRetryCount(0);
+    setLastAudioUri(null);
   };
 
   const getUrgencyColor = (level: string) => {
@@ -306,10 +405,55 @@ export default function PatientRecordScreen() {
 
           <View style={st.aiBanner}>
             <Cpu size={14} color={theme.primary} />
-            <Text style={st.aiBannerText}>STT: Whisper (server) • LLM: GPT-4.1-mini</Text>
+            <Text style={st.aiBannerText}>STT: Whisper-{whisperModel} • LLM: GPT-4.1-mini</Text>
           </View>
 
-          {error ? <View style={st.errBox}><AlertTriangle size={16} color={theme.error} /><Text style={st.errText}>{error}</Text></View> : null}
+          {/* Language Selector */}
+          <TouchableOpacity style={st.languageSelector} onPress={() => setShowLanguagePicker(true)} activeOpacity={0.7}>
+            <Languages size={16} color={theme.primary} />
+            <Text style={st.langText}>{selectedLangInfo.flag}  {selectedLangInfo.name}</Text>
+            <ChevronDown size={14} color={theme.textSecondary} />
+          </TouchableOpacity>
+
+          {/* Language Picker Modal */}
+          <Modal visible={showLanguagePicker} transparent animationType="slide">
+            <TouchableOpacity style={st.modalOverlay} activeOpacity={1} onPress={() => setShowLanguagePicker(false)}>
+              <View style={st.modalContent}>
+                <Text style={st.modalTitle}>Select Language</Text>
+                <Text style={st.modalDesc}>Choose the language of the conversation. Auto-detect works for most cases.</Text>
+                <FlatList
+                  data={languages}
+                  keyExtractor={(item) => item.code}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[st.langOption, selectedLanguage === item.code && st.langOptionActive]}
+                      onPress={() => { setSelectedLanguage(item.code); setShowLanguagePicker(false); }}
+                    >
+                      <Text style={st.langFlag}>{item.flag}</Text>
+                      <View style={st.langInfo}>
+                        <Text style={[st.langName, selectedLanguage === item.code && st.langNameActive]}>{item.name}</Text>
+                        <Text style={st.langCode}>{item.code === 'auto' ? 'Whisper auto-detects' : `Code: ${item.code}`}</Text>
+                      </View>
+                      {selectedLanguage === item.code && <CheckCircle size={18} color={theme.primary} />}
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            </TouchableOpacity>
+          </Modal>
+
+          {error ? (
+            <View style={st.errBox}>
+              <AlertTriangle size={16} color={theme.error} />
+              <Text style={st.errText}>{error}</Text>
+              {lastAudioUri && step === 'ready' && (
+                <TouchableOpacity style={st.retryBtn} onPress={retryUpload}>
+                  <RefreshCw size={14} color="#FFF" />
+                  <Text style={st.retryText}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null}
 
           {/* READY STATE */}
           {step === 'ready' && (
@@ -334,7 +478,7 @@ export default function PatientRecordScreen() {
               <View style={st.pipelineInfo}>
                 <Text style={st.pipelineTitle}>Processing Pipeline</Text>
                 <View style={st.pipelineStep}><View style={st.pipeDot} /><Text style={st.pipeText}>Record audio from microphone</Text></View>
-                <View style={st.pipelineStep}><View style={st.pipeDot} /><Text style={st.pipeText}>Upload & transcribe with Whisper AI</Text></View>
+                <View style={st.pipelineStep}><View style={st.pipeDot} /><Text style={st.pipeText}>Upload & transcribe with Whisper AI ({selectedLangInfo.name})</Text></View>
                 <View style={st.pipelineStep}><View style={st.pipeDot} /><Text style={st.pipeText}>LLM extracts symptoms, diagnosis & more</Text></View>
                 <View style={st.pipelineStep}><View style={st.pipeDot} /><Text style={st.pipeText}>Review, edit & submit to doctor</Text></View>
               </View>
@@ -348,6 +492,7 @@ export default function PatientRecordScreen() {
                 <View style={st.liveDot} />
                 <Text style={st.timerText}>{formatDuration(recordingDuration)}</Text>
               </View>
+              <Text style={st.langRecording}>{selectedLangInfo.flag} {selectedLangInfo.name}</Text>
               <TouchableOpacity onPress={stopRecording} activeOpacity={0.7}>
                 <Animated.View style={[st.micCircleActive, { transform: [{ scale: pulseAnim }] }]}>
                   <Square size={28} color="#FFF" fill="#FFF" />
@@ -367,7 +512,8 @@ export default function PatientRecordScreen() {
             <View style={st.processingContainer}>
               <ActivityIndicator size="large" color="#10B981" />
               <Text style={st.processingTitle}>Uploading Audio...</Text>
-              <Text style={st.processingDesc}>Sending recording to server</Text>
+              <Text style={st.processingDesc}>Sending recording to server{retryCount > 0 ? ` (attempt ${retryCount + 1})` : ''}</Text>
+              <View style={st.progressBar}><View style={[st.progressFill, { width: `${uploadProgress}%` }]} /></View>
             </View>
           )}
 
@@ -376,10 +522,10 @@ export default function PatientRecordScreen() {
             <View style={st.processingContainer}>
               <ActivityIndicator size="large" color="#10B981" />
               <Text style={st.processingTitle}>Transcribing with Whisper...</Text>
-              <Text style={st.processingDesc}>Running speech-to-text AI model</Text>
+              <Text style={st.processingDesc}>{selectedLangInfo.flag} {selectedLangInfo.code === 'auto' ? 'Auto-detecting language' : selectedLangInfo.name}</Text>
               <View style={st.processingSteps}>
                 <Text style={st.procStep}>✓ Audio uploaded</Text>
-                <Text style={[st.procStep, st.procActive]}>⟳ Running Whisper STT...</Text>
+                <Text style={[st.procStep, st.procActive]}>⟳ Running Whisper STT ({whisperModel})...</Text>
                 <Text style={st.procPending}>○ LLM medical extraction</Text>
               </View>
             </View>
@@ -404,9 +550,15 @@ export default function PatientRecordScreen() {
               {/* STT Stats */}
               {sttInfo && (
                 <View style={st.sttStats}>
+                  {sttInfo.language_name ? (
+                    <View style={st.sttStat}>
+                      <Globe size={14} color={theme.primary} />
+                      <Text style={st.sttStatText}>{sttInfo.language_name}</Text>
+                    </View>
+                  ) : null}
                   {sttInfo.confidence ? <View style={st.sttStat}><BarChart3 size={14} color={theme.primary} /><Text style={st.sttStatText}>{(sttInfo.confidence * 100).toFixed(0)}% conf.</Text></View> : null}
                   {sttInfo.duration_seconds ? <View style={st.sttStat}><Clock size={14} color={theme.primary} /><Text style={st.sttStatText}>{sttInfo.duration_seconds}s audio</Text></View> : null}
-                  <View style={st.sttStat}><Cpu size={14} color={theme.primary} /><Text style={st.sttStatText}>{sttInfo.model || 'whisper'}</Text></View>
+                  <View style={st.sttStat}><Cpu size={14} color={theme.primary} /><Text style={st.sttStatText}>{sttInfo.model || `whisper-${whisperModel}`}</Text></View>
                 </View>
               )}
 
@@ -604,10 +756,25 @@ const st = StyleSheet.create({
   e2eeText: { fontSize: FontSizes.xs, color: '#10B981', fontWeight: '700' },
   aiBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8EEFF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, gap: 4 },
   aiText: { fontSize: FontSizes.xs, color: '#0033A0', fontWeight: '700' },
-  aiBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8EEFF', paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: 6, gap: 8, marginBottom: Spacing.lg },
+  aiBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8EEFF', paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: 6, gap: 8, marginBottom: Spacing.sm },
   aiBannerText: { fontSize: FontSizes.sm, color: theme.primary, fontWeight: '500' },
-  errBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', padding: Spacing.md, borderRadius: 6, marginBottom: Spacing.base, borderLeftWidth: 3, borderLeftColor: theme.error, gap: 8 },
+  languageSelector: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 8, paddingHorizontal: Spacing.md, paddingVertical: 10, gap: 8, marginBottom: Spacing.lg },
+  langText: { flex: 1, fontSize: FontSizes.base, color: theme.textPrimary, fontWeight: '500' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: theme.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: Spacing.lg, maxHeight: '60%' },
+  modalTitle: { fontSize: FontSizes.xl, fontWeight: '700', color: theme.textPrimary, marginBottom: 4 },
+  modalDesc: { fontSize: FontSizes.sm, color: theme.textSecondary, marginBottom: Spacing.lg },
+  langOption: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.md, paddingHorizontal: Spacing.md, borderRadius: 10, marginBottom: Spacing.sm, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border },
+  langOptionActive: { borderColor: theme.primary, backgroundColor: '#E8EEFF' },
+  langFlag: { fontSize: 24, marginRight: Spacing.md },
+  langInfo: { flex: 1 },
+  langName: { fontSize: FontSizes.base, fontWeight: '600', color: theme.textPrimary },
+  langNameActive: { color: theme.primary },
+  langCode: { fontSize: FontSizes.sm, color: theme.textSecondary, marginTop: 2 },
+  errBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', padding: Spacing.md, borderRadius: 6, marginBottom: Spacing.base, borderLeftWidth: 3, borderLeftColor: theme.error, gap: 8, flexWrap: 'wrap' },
   errText: { color: theme.error, fontSize: FontSizes.md, flex: 1 },
+  retryBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, gap: 4 },
+  retryText: { color: '#FFF', fontSize: FontSizes.sm, fontWeight: '600' },
   subtitle: { fontSize: FontSizes.md, color: theme.textSecondary, lineHeight: 22, marginBottom: Spacing.lg },
   readyContainer: { alignItems: 'center', paddingVertical: Spacing.md },
   bigMicBtn: { marginTop: Spacing.lg },
@@ -623,15 +790,18 @@ const st = StyleSheet.create({
   pipeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
   pipeText: { fontSize: FontSizes.sm, color: theme.textPrimary },
   recordingContainer: { alignItems: 'center', paddingVertical: Spacing.xl },
-  timerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: Spacing.lg },
+  timerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: Spacing.sm },
   liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.error },
   timerText: { fontSize: FontSizes.xxl, fontWeight: '700', color: theme.textPrimary, fontVariant: ['tabular-nums'] },
+  langRecording: { fontSize: FontSizes.md, color: theme.textSecondary, marginBottom: Spacing.lg },
   micCircleActive: { width: 96, height: 96, borderRadius: 48, backgroundColor: theme.error, alignItems: 'center', justifyContent: 'center' },
   waveContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: Spacing.lg, height: 40 },
   waveBar: { width: 4, borderRadius: 2, backgroundColor: '#10B981' },
   processingContainer: { alignItems: 'center', paddingVertical: Spacing.xxxl },
   processingTitle: { fontSize: FontSizes.xl, fontWeight: '700', color: theme.textPrimary, marginTop: Spacing.lg },
   processingDesc: { fontSize: FontSizes.md, color: theme.textSecondary, marginTop: Spacing.sm },
+  progressBar: { width: '80%', height: 4, backgroundColor: theme.border, borderRadius: 2, marginTop: Spacing.lg, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#10B981', borderRadius: 2 },
   processingSteps: { marginTop: Spacing.lg, alignItems: 'flex-start' },
   procStep: { fontSize: FontSizes.md, color: '#10B981', marginBottom: 4 },
   procActive: { color: theme.primary, fontWeight: '600' },

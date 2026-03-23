@@ -45,13 +45,36 @@ logger = logging.getLogger(__name__)
 # Whisper model - lazy loaded
 _whisper_model = None
 
+# ============== MULTILINGUAL SUPPORT ==============
+# Extensible language configuration — add new languages here
+SUPPORTED_LANGUAGES = {
+    "auto": {"name": "Auto-detect", "whisper_code": None, "flag": "🌐"},
+    "en": {"name": "English", "whisper_code": "en", "flag": "🇬🇧"},
+    "hi": {"name": "Hindi", "whisper_code": "hi", "flag": "🇮🇳"},
+    # To add more languages, simply add entries here:
+    # "es": {"name": "Spanish", "whisper_code": "es", "flag": "🇪🇸"},
+    # "fr": {"name": "French", "whisper_code": "fr", "flag": "🇫🇷"},
+    # "de": {"name": "German", "whisper_code": "de", "flag": "🇩🇪"},
+    # "zh": {"name": "Chinese", "whisper_code": "zh", "flag": "🇨🇳"},
+    # "ar": {"name": "Arabic", "whisper_code": "ar", "flag": "🇸🇦"},
+    # "ja": {"name": "Japanese", "whisper_code": "ja", "flag": "🇯🇵"},
+    # "pt": {"name": "Portuguese", "whisper_code": "pt", "flag": "🇧🇷"},
+    # "bn": {"name": "Bengali", "whisper_code": "bn", "flag": "🇧🇩"},
+    # "ta": {"name": "Tamil", "whisper_code": "ta", "flag": "🇮🇳"},
+    # "te": {"name": "Telugu", "whisper_code": "te", "flag": "🇮🇳"},
+    # "mr": {"name": "Marathi", "whisper_code": "mr", "flag": "🇮🇳"},
+    # "ur": {"name": "Urdu", "whisper_code": "ur", "flag": "🇵🇰"},
+}
+
+WHISPER_MODEL_SIZE = "base"  # "base" for good multilingual; "small" for best accuracy
+
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        logger.info("Loading Whisper model (tiny)...")
-        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-        logger.info("Whisper model loaded.")
+        logger.info(f"Loading Whisper model ({WHISPER_MODEL_SIZE})...")
+        _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
+        logger.info(f"Whisper model ({WHISPER_MODEL_SIZE}) loaded.")
     return _whisper_model
 
 # ============== HELPERS ==============
@@ -470,11 +493,23 @@ async def get_dashboard_stats(user=Depends(get_current_user)):
 
 # ============== AUDIO TRANSCRIPTION & AI EXTRACTION ==============
 
-async def run_whisper_transcription(audio_path: str) -> dict:
-    """Run Whisper STT in a thread pool to avoid blocking the event loop."""
+async def run_whisper_transcription(audio_path: str, language: str = "auto") -> dict:
+    """Run Whisper STT in a thread pool to avoid blocking the event loop.
+    language: 'auto' for auto-detection, or a language code like 'en', 'hi', etc."""
     def _transcribe():
         model = get_whisper_model()
-        segments, info = model.transcribe(audio_path, beam_size=5, language="en")
+        # Resolve language: None = auto-detect, otherwise use the whisper code
+        lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES.get("auto"))
+        whisper_lang = lang_config["whisper_code"] if lang_config else None
+        
+        logger.info(f"Whisper transcribing: lang={language} (whisper_code={whisper_lang})")
+        segments, info = model.transcribe(
+            audio_path,
+            beam_size=5,
+            language=whisper_lang,  # None = auto-detect
+            vad_filter=True,  # Voice Activity Detection to filter silence
+            vad_parameters=dict(min_silence_duration_ms=500),
+        )
         text_parts = []
         segment_data = []
         for seg in segments:
@@ -484,44 +519,55 @@ async def run_whisper_transcription(audio_path: str) -> dict:
                 "end": round(seg.end, 2),
                 "text": seg.text.strip(),
             })
+        detected_lang = info.language
+        detected_lang_name = SUPPORTED_LANGUAGES.get(detected_lang, {}).get("name", detected_lang)
         return {
             "transcript": " ".join(text_parts),
             "segments": segment_data,
-            "language": info.language,
+            "language": detected_lang,
+            "language_name": detected_lang_name,
             "language_probability": round(info.language_probability, 3),
             "duration": round(info.duration, 2),
+            "requested_language": language,
         }
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _transcribe)
 
-async def run_llm_extraction(transcript: str) -> dict:
-    """Use LLM to extract structured medical data from a transcript."""
+async def run_llm_extraction(transcript: str, detected_language: str = "en") -> dict:
+    """Use LLM to extract structured medical data from a transcript (any language)."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    lang_name = SUPPORTED_LANGUAGES.get(detected_language, {}).get("name", detected_language)
 
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"medscribe-extract-{uuid.uuid4().hex[:8]}",
-        system_message="""You are MedScribe AI, a medical transcript analyzer. 
-Given a doctor-patient conversation transcript, extract structured medical information.
+        system_message=f"""You are MedScribe AI, a multilingual medical transcript analyzer.
+The transcript may be in {lang_name} ({detected_language}) or a mix of languages (code-switching is common in medical consultations).
+Extract structured medical information regardless of the transcript language.
+ALWAYS return the extracted data in English for standardized medical records, but include the original language terms in parentheses where clinically relevant.
+
 Return ONLY valid JSON with this exact schema (no markdown, no code fences):
-{
-  "chief_complaint": "Brief primary complaint",
-  "symptoms": [{"name": "symptom", "severity": "mild/moderate/severe", "duration": "how long", "notes": "extra detail"}],
+{{
+  "chief_complaint": "Brief primary complaint in English",
+  "symptoms": [{{"name": "symptom in English", "severity": "mild/moderate/severe", "duration": "how long", "notes": "extra detail"}}],
   "medical_history_mentioned": ["any past conditions mentioned"],
   "medications_mentioned": ["any medications the patient says they take"],
   "allergies_mentioned": ["any allergies mentioned"],
-  "vital_signs_mentioned": {"temperature": "", "blood_pressure": "", "heart_rate": "", "other": ""},
+  "vital_signs_mentioned": {{"temperature": "", "blood_pressure": "", "heart_rate": "", "other": ""}},
   "suggested_diagnosis": ["possible diagnoses based on symptoms"],
   "recommended_tests": ["suggested diagnostic tests"],
   "urgency_level": "low/medium/high/critical",
-  "key_quotes": ["important verbatim quotes from the conversation"],
-  "summary": "2-3 sentence clinical summary of the conversation"
-}
+  "key_quotes": ["important verbatim quotes from the conversation in their ORIGINAL language"],
+  "summary": "2-3 sentence clinical summary in English",
+  "transcript_language": "{detected_language}",
+  "language_name": "{lang_name}"
+}}
 If a field has no data, use empty string or empty array. Always return valid JSON."""
     ).with_model("openai", "gpt-4.1-mini")
 
     user_message = UserMessage(
-        text=f"Extract structured medical information from this doctor-patient conversation transcript:\n\n{transcript}"
+        text=f"Extract structured medical information from this doctor-patient conversation transcript (language: {lang_name}):\n\n{transcript}"
     )
     response_text = await chat.send_message(user_message)
 
@@ -557,11 +603,17 @@ If a field has no data, use empty string or empty array. Always return valid JSO
 @api_router.post("/audio/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
+    language: str = Form("auto"),
     user=Depends(get_current_user)
 ):
-    """Upload audio file, transcribe with Whisper, extract medical data with LLM."""
+    """Upload audio file, transcribe with Whisper, extract medical data with LLM.
+    language: 'auto', 'en', 'hi', etc. See /api/languages for supported list."""
     if not audio.filename:
         raise HTTPException(status_code=400, detail="No audio file provided")
+
+    # Validate language
+    if language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(status_code=400, detail=f"Unsupported language: {language}. Use /api/languages to see supported list.")
 
     # Save uploaded audio to temp file
     suffix = Path(audio.filename).suffix or ".webm"
@@ -569,35 +621,38 @@ async def transcribe_audio(
     try:
         content = await audio.read()
         if len(content) < 100:
-            raise HTTPException(status_code=400, detail="Audio file too small")
+            raise HTTPException(status_code=400, detail="Audio file too small — recording may have failed")
         with open(tmp_path, "wb") as f:
             f.write(content)
 
-        # Step 1: Transcribe with Whisper
-        logger.info(f"Transcribing audio: {tmp_path.name} ({len(content)} bytes)")
-        stt_result = await run_whisper_transcription(str(tmp_path))
+        # Step 1: Transcribe with Whisper (multilingual)
+        logger.info(f"Transcribing audio: {tmp_path.name} ({len(content)} bytes, lang={language})")
+        stt_result = await run_whisper_transcription(str(tmp_path), language=language)
 
         if not stt_result["transcript"].strip():
             return {
                 "transcript": "",
                 "stt": stt_result,
                 "extraction": None,
-                "message": "No speech detected in the audio.",
-                "processing_method": "whisper-tiny-server"
+                "message": "No speech detected in the audio. Please try recording again.",
+                "processing_method": f"whisper-{WHISPER_MODEL_SIZE}-server"
             }
 
-        # Step 2: Extract structured medical data with LLM
-        logger.info(f"Running LLM extraction on transcript ({len(stt_result['transcript'])} chars)")
-        extraction = await run_llm_extraction(stt_result["transcript"])
+        # Step 2: Extract structured medical data with LLM (multilingual)
+        detected_lang = stt_result.get("language", language if language != "auto" else "en")
+        logger.info(f"Running LLM extraction (detected_lang={detected_lang}, {len(stt_result['transcript'])} chars)")
+        extraction = await run_llm_extraction(stt_result["transcript"], detected_language=detected_lang)
 
         return {
             "transcript": stt_result["transcript"],
             "stt": {
                 "segments": stt_result["segments"],
                 "language": stt_result["language"],
+                "language_name": stt_result.get("language_name", stt_result["language"]),
                 "confidence": stt_result["language_probability"],
                 "duration_seconds": stt_result["duration"],
-                "model": "whisper-tiny",
+                "requested_language": stt_result.get("requested_language", language),
+                "model": f"whisper-{WHISPER_MODEL_SIZE}",
                 "processing_method": "faster-whisper-server"
             },
             "extraction": extraction,
@@ -605,11 +660,25 @@ async def transcribe_audio(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error(f"Transcription failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
+
+@api_router.get("/languages")
+async def get_supported_languages():
+    """Return list of supported languages for transcription.
+    Frontend fetches this dynamically — adding a language on the backend
+    automatically makes it available in the app."""
+    return {
+        "languages": [
+            {"code": code, **info}
+            for code, info in SUPPORTED_LANGUAGES.items()
+        ],
+        "default": "auto",
+        "whisper_model": WHISPER_MODEL_SIZE,
+    }
 
 @api_router.post("/audio/extract-from-text")
 async def extract_from_text(
@@ -618,9 +687,10 @@ async def extract_from_text(
 ):
     """Extract structured medical data from an already-transcribed text."""
     transcript = data.get("transcript", "")
+    language = data.get("language", "en")
     if not transcript.strip():
         raise HTTPException(status_code=400, detail="Transcript text is required")
-    extraction = await run_llm_extraction(transcript)
+    extraction = await run_llm_extraction(transcript, detected_language=language)
     return {"extraction": extraction}
 
 # ============== E2EE KEY MANAGEMENT ==============
