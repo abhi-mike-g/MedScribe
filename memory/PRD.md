@@ -60,14 +60,19 @@ MedScribe is an end-to-end encrypted, local-first mobile application for doctor-
 ## Current Status
 - ✅ Multi-role auth (register/login) - COMPLETE
 - ✅ All 3 portals with full tab navigation - COMPLETE
-- ✅ Backend API (16+ endpoints) - COMPLETE & TESTED
-- ✅ Patient case submission flow - COMPLETE
+- ✅ Backend API (20+ endpoints) - COMPLETE & TESTED
+- ✅ Real audio recording with expo-audio - COMPLETE
+- ✅ Real STT with Whisper (faster-whisper on server) - COMPLETE
+- ✅ LLM medical extraction with GPT-4.1-mini - COMPLETE
+- ✅ Patient case submission with AI data - COMPLETE
 - ✅ Doctor case response flow - COMPLETE
 - ✅ Prescription generation with PDF - COMPLETE
 - ✅ Medication database - COMPLETE
 - ✅ Admin dashboard & user management - COMPLETE
-- ✅ Voice recording with expo-audio - COMPLETE
-- ✅ AI bridge architecture (mock for web) - COMPLETE
+- ✅ E2EE infrastructure (RSA key pairs, AES-256-GCM) - COMPLETE
+- ✅ Encrypted file attachment upload/download - COMPLETE
+- ✅ E2EE key exchange endpoints - COMPLETE
+- ✅ Client-side E2EE module (crypto/e2ee.ts) - COMPLETE
 
 ## Upcoming
 - E2EE file transfer implementation

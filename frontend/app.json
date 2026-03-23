@@ -11,7 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Record consultations for transcription"
+        "NSMicrophoneUsageDescription": "Record consultations for transcription",
+        "NSCameraUsageDescription": "Capture medical documents and photos",
+        "NSPhotoLibraryUsageDescription": "Attach medical photos to cases"
       }
     },
     "android": {
@@ -21,7 +23,10 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
