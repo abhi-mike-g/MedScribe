@@ -9,10 +9,11 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="new-consultation" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="consultation/[id]" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="patient/[id]" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="(doctor-tabs)" />
+        <Stack.Screen name="(patient-tabs)" />
+        <Stack.Screen name="(admin-tabs)" />
+        <Stack.Screen name="case/[id]" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="doctor-respond/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="prescription/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="medication/[name]" options={{ presentation: 'modal' }} />
       </Stack>

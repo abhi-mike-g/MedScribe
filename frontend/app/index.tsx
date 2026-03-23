@@ -11,7 +11,10 @@ export default function Index() {
   useEffect(() => {
     if (!loading) {
       if (user) {
-        router.replace('/(tabs)/dashboard');
+        if (user.role === 'doctor') router.replace('/(doctor-tabs)/dashboard');
+        else if (user.role === 'patient') router.replace('/(patient-tabs)/home');
+        else if (user.role === 'admin') router.replace('/(admin-tabs)/overview');
+        else router.replace('/(auth)/login');
       } else {
         router.replace('/(auth)/login');
       }
@@ -19,17 +22,8 @@ export default function Index() {
   }, [loading, user]);
 
   return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color={theme.primary} />
-    </View>
+    <View style={s.c}><ActivityIndicator size="large" color={theme.primary} /></View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+const s = StyleSheet.create({ c: { flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center' } });
