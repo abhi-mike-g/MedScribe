@@ -12,7 +12,7 @@ import numpy as np
 from pathlib import Path
 
 # Backend URL from frontend/.env
-BACKEND_URL = "https://medscribe-multi-role.preview.emergentagent.com/api"
+BACKEND_URL = "https://e2ee-transfer.preview.emergentagent.com/api"
 
 class TestMultilingualAudioSimplified:
     def __init__(self):
