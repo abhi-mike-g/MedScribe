@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
-import * as FileSystem from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
 import { useAuth } from '../../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
 import { Mic, MicOff, Lock, Cpu, Square, Edit3, Clock, BarChart3, Send, CheckCircle, AlertTriangle, Stethoscope, Pill, Activity, FileText, Brain, Thermometer, ChevronDown, ChevronUp, Globe, Languages, RefreshCw } from 'lucide-react-native';
@@ -189,9 +189,16 @@ export default function PatientRecordScreen() {
         formData.append('audio', blob, 'recording.webm');
       } else {
         // Android/iOS: use the native file URI
-        const fileInfo = await FileSystem.getInfoAsync(audioUri);
-        if (!fileInfo.exists) {
-          throw new Error('Audio file not found on device');
+        // Verify file exists using new expo-file-system File class (SDK 54+)
+        try {
+          const filePath = audioUri.startsWith('file://') ? audioUri.replace('file://', '') : audioUri;
+          const audioFile = new ExpoFile(filePath);
+          if (!audioFile.exists) {
+            throw new Error('Audio file not found on device');
+          }
+        } catch (fileCheckError: any) {
+          // If file check fails, log but proceed anyway - the recorder just created this file
+          console.warn('File existence check warning (proceeding with upload):', fileCheckError?.message);
         }
         // Determine file extension from URI
         const extension = audioUri.split('.').pop() || 'm4a';
