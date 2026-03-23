@@ -4,11 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
-import { Shield, Lock, Cpu, Key, LogOut, ChevronRight, User, FileText, Database, Fingerprint } from 'lucide-react-native';
+import { Shield, Lock, Cpu, Key, LogOut, ChevronRight, User, FileText, Database, Fingerprint, Globe, Smartphone } from 'lucide-react-native';
+import { getNativeAIStatus } from '../../src/native/NativeAIProvider';
 
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const aiStatus = getNativeAIStatus();
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -86,15 +88,38 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <View style={styles.settingRow}>
             <View style={styles.settingLeft}>
+              <View style={[styles.iconBg, { backgroundColor: aiStatus.isWebPreview ? '#FEF3C7' : '#E8EEFF' }]}>
+                {aiStatus.isWebPreview ? <Globe size={18} color="#92400E" /> : <Smartphone size={18} color={theme.primary} />}
+              </View>
+              <View>
+                <Text style={styles.settingTitle}>Inference Mode</Text>
+                <Text style={styles.settingDesc}>{aiStatus.isWebPreview ? 'Web Preview (Mock Fallback)' : 'Native On-Device'}</Text>
+              </View>
+            </View>
+            <View style={aiStatus.isWebPreview ? styles.loadedBadge : styles.activeBadge}>
+              <Text style={aiStatus.isWebPreview ? styles.loadedText : styles.activeText}>
+                {aiStatus.isWebPreview ? 'MOCK' : 'NATIVE'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
               <View style={[styles.iconBg, { backgroundColor: '#E8EEFF' }]}>
                 <Cpu size={18} color={theme.primary} />
               </View>
               <View>
                 <Text style={styles.settingTitle}>Speech-to-Text Engine</Text>
-                <Text style={styles.settingDesc}>whisper-cpp-base.en (Quantized)</Text>
+                <Text style={styles.settingDesc}>{aiStatus.stt.modelName} ({aiStatus.stt.modelSize})</Text>
               </View>
             </View>
-            <View style={styles.loadedBadge}><Text style={styles.loadedText}>LOADED</Text></View>
+            <View style={aiStatus.stt.isNativeAvailable ? styles.activeBadge : styles.loadedBadge}>
+              <Text style={aiStatus.stt.isNativeAvailable ? styles.activeText : styles.loadedText}>
+                {aiStatus.stt.isNativeAvailable ? 'NATIVE' : 'READY'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.divider} />
@@ -106,10 +131,14 @@ export default function SettingsScreen() {
               </View>
               <View>
                 <Text style={styles.settingTitle}>Medical LLM</Text>
-                <Text style={styles.settingDesc}>phi-3-mini-4k-q4 (On-Device)</Text>
+                <Text style={styles.settingDesc}>{aiStatus.llm.modelName} ({aiStatus.llm.modelSize})</Text>
               </View>
             </View>
-            <View style={styles.loadedBadge}><Text style={styles.loadedText}>LOADED</Text></View>
+            <View style={aiStatus.llm.isNativeAvailable ? styles.activeBadge : styles.loadedBadge}>
+              <Text style={aiStatus.llm.isNativeAvailable ? styles.activeText : styles.loadedText}>
+                {aiStatus.llm.isNativeAvailable ? 'NATIVE' : 'READY'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.divider} />
@@ -121,10 +150,14 @@ export default function SettingsScreen() {
               </View>
               <View>
                 <Text style={styles.settingTitle}>Hardware Acceleration</Text>
-                <Text style={styles.settingDesc}>NNAPI + GPU Delegate</Text>
+                <Text style={styles.settingDesc}>{aiStatus.hardwareAcceleration[0]}</Text>
               </View>
             </View>
-            <View style={styles.activeBadge}><Text style={styles.activeText}>ON</Text></View>
+            <View style={aiStatus.isWebPreview ? styles.loadedBadge : styles.activeBadge}>
+              <Text style={aiStatus.isWebPreview ? styles.loadedText : styles.activeText}>
+                {aiStatus.isWebPreview ? 'N/A' : 'ON'}
+              </Text>
+            </View>
           </View>
         </View>
 
