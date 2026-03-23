@@ -66,7 +66,18 @@ MedScribe is an end-to-end encrypted, local-first mobile application for doctor-
 - bcrypt/PyJWT (auth)
 
 ## Note on AI
-All AI features are **SIMULATED** on-device. The STT and LLM endpoints return predefined medical data to demonstrate the architecture. In production, these would use actual on-device models (Whisper-CPP, Phi-3-mini) via ONNX Runtime or TensorFlow Lite with NDK integration.
+All AI features use the **Native AI Bridge Architecture** (`/src/native/`):
+- **WhisperBridge.ts** — STT interface with mock fallback for web preview
+- **Phi3Bridge.ts** — Medical LLM interface with intelligent transcript parsing mock
+- **NativeAIProvider.ts** — Unified orchestrator with platform detection
+
+On web preview: Uses intelligent mock that parses transcript text to extract symptoms, vitals, medications, and ICD codes. On physical Android device: Routes through native JNI bridge to actual Whisper-CPP and Phi-3 ONNX Runtime inference.
+
+### Audio Recording
+- Uses `expo-av` for real microphone recording with permission handling
+- Falls back gracefully on web preview when actual mic access isn't available
+- Transcripts are **editable** after STT processing — doctors can fix any errors before extraction
+- `app.json` declares `RECORD_AUDIO` (Android) and `NSMicrophoneUsageDescription` (iOS) permissions
 
 ## Business Enhancement
 Consider adding a **subscription tier** for multi-device sync with encrypted cloud backup — doctors get local-first by default (free), and can opt into HIPAA-compliant encrypted sync across devices for a monthly fee.

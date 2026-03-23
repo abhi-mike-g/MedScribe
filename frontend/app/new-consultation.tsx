@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Animated, TextInput, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Audio } from 'expo-av';
+import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 import { useAuth } from '../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../src/constants/theme';
 import { transcribeAudio, extractMedicalData, getNativeAIStatus } from '../src/native/NativeAIProvider';
@@ -21,10 +21,10 @@ export default function NewConsultationScreen() {
 
   // Recording state
   const [recording, setRecording] = useState(false);
-  const [recordingInstance, setRecordingInstance] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [audioUri, setAudioUri] = useState<string | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   // Transcript state  
   const [transcript, setTranscript] = useState('');
@@ -72,11 +72,15 @@ export default function NewConsultationScreen() {
         setPermissionGranted(true);
         return;
       }
-      const { status } = await Audio.requestPermissionsAsync();
-      setPermissionGranted(status === 'granted');
-      if (status !== 'granted') {
+      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+      setPermissionGranted(granted);
+      if (!granted) {
         Alert.alert('Microphone Permission', 'Microphone access is required for recording consultations. Please enable it in Settings.');
       }
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
+      });
     } catch (e) {
       console.warn('Permission request failed:', e);
       setPermissionGranted(true); // Allow fallback on web
@@ -122,17 +126,8 @@ export default function NewConsultationScreen() {
 
   const startRecording = async () => {
     try {
-      if (Platform.OS !== 'web') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-      }
-
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecordingInstance(newRecording);
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setRecording(true);
       setRecordingDuration(0);
 
@@ -142,7 +137,7 @@ export default function NewConsultationScreen() {
       }, 1000);
     } catch (err) {
       console.error('Failed to start recording:', err);
-      // Fallback: simulate recording on web if Audio.Recording fails
+      // Fallback: simulate recording on web if recorder fails
       setRecording(true);
       setRecordingDuration(0);
       timerRef.current = setInterval(() => {
@@ -161,22 +156,10 @@ export default function NewConsultationScreen() {
     const durationMs = recordingDuration * 1000;
 
     try {
-      if (recordingInstance) {
-        await recordingInstance.stopAndUnloadAsync();
-        const uri = recordingInstance.getURI();
-        setAudioUri(uri);
-        setRecordingInstance(null);
-
-        if (Platform.OS !== 'web') {
-          await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-        }
-
-        // Process through Native AI bridge
-        processAudio(uri || '', durationMs);
-      } else {
-        // Web fallback — no actual audio file
-        processAudio('web-recording-mock', durationMs);
-      }
+      await recorder.stop();
+      const uri = recorder.uri;
+      setAudioUri(uri || null);
+      processAudio(uri || 'web-recording-mock', durationMs);
     } catch (err) {
       console.error('Failed to stop recording:', err);
       processAudio('fallback-recording', durationMs);
