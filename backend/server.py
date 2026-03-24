@@ -352,6 +352,82 @@ async def respond_to_case(case_id: str, data: DoctorResponse, user=Depends(requi
     updated = await db.cases.find_one({"id": case_id}, {"_id": 0})
     return updated
 
+# ============== DOCTOR CONSULTATION NOTES ==============
+
+class ConsultationSubmit(BaseModel):
+    transcript: str
+    chief_complaint: str = ""
+    extraction_data: Optional[dict] = None
+    patient_id: Optional[str] = None  # Optional PAT-XXXXXX to link to patient
+    patient_name: Optional[str] = None
+    consultation_type: str = "general"  # general, follow_up, emergency, new_patient
+    doctor_notes: str = ""
+
+@api_router.post("/doctor/consultation")
+async def create_consultation(data: ConsultationSubmit, user=Depends(require_role("doctor"))):
+    """Doctor creates a consultation note from a recorded clinic visit."""
+    consultation_id = str(uuid.uuid4())
+
+    # If patient_id provided, validate and look up patient
+    patient_info = {}
+    if data.patient_id:
+        patient = await db.users.find_one({"patient_id": data.patient_id, "role": "patient"}, {"_id": 0})
+        if patient:
+            patient_info = {
+                "patient_user_id": patient["id"],
+                "patient_id": patient["patient_id"],
+                "patient_name": patient["name"],
+                "patient_age": patient.get("age", 0),
+                "patient_gender": patient.get("gender", ""),
+            }
+        else:
+            # Patient ID not found — store the provided name anyway
+            patient_info = {
+                "patient_id": data.patient_id,
+                "patient_name": data.patient_name or "Unknown Patient",
+            }
+    elif data.patient_name:
+        patient_info = {"patient_name": data.patient_name}
+
+    consultation_doc = {
+        "id": consultation_id,
+        "type": "consultation",
+        "doctor_id": user["id"],
+        "doctor_name": user["name"],
+        "doctor_specialty": user.get("specialty", ""),
+        **patient_info,
+        "transcript": data.transcript,
+        "chief_complaint": data.chief_complaint,
+        "extraction_data": data.extraction_data,
+        "consultation_type": data.consultation_type,
+        "doctor_notes": data.doctor_notes,
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "encrypted": True,
+        "encryption_status": "AES-256-GCM",
+    }
+    await db.consultations.insert_one(consultation_doc)
+    return {k: v for k, v in consultation_doc.items() if k != "_id"}
+
+@api_router.get("/doctor/consultations")
+async def get_doctor_consultations(user=Depends(require_role("doctor"))):
+    """Get all consultation notes for the current doctor."""
+    consultations = await db.consultations.find(
+        {"doctor_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return consultations
+
+@api_router.get("/doctor/consultations/{consultation_id}")
+async def get_consultation(consultation_id: str, user=Depends(require_role("doctor"))):
+    """Get a specific consultation note."""
+    doc = await db.consultations.find_one({"id": consultation_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    if doc["doctor_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return doc
+
 # ============== PRESCRIPTION (accessible by patient + doctor) ==============
 
 @api_router.get("/prescriptions")
@@ -479,8 +555,10 @@ async def get_dashboard_stats(user=Depends(get_current_user)):
         pc = await db.cases.count_documents({"assigned_doctor_id": user["id"]})
         pending = await db.cases.count_documents({"$or": [{"status": "pending"}, {"assigned_doctor_id": user["id"], "status": {"$ne": "responded"}}]})
         rx_count = await db.prescriptions.count_documents({"doctor_id": user["id"]})
+        consultation_count = await db.consultations.count_documents({"doctor_id": user["id"]})
         recent = await db.cases.find({"$or": [{"status": "pending"}, {"assigned_doctor_id": user["id"]}]}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
-        return {"patient_count": pc, "pending_cases": pending, "prescription_count": rx_count, "recent_cases": recent, "encryption_status": "AES-256-GCM", "compliance": ["HIPAA","GDPR"]}
+        recent_consultations = await db.consultations.find({"doctor_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
+        return {"patient_count": pc, "pending_cases": pending, "prescription_count": rx_count, "consultation_count": consultation_count, "recent_cases": recent, "recent_consultations": recent_consultations, "encryption_status": "AES-256-GCM", "compliance": ["HIPAA","GDPR"]}
     elif user["role"] == "patient":
         cases = await db.cases.find({"patient_user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
         total = await db.cases.count_documents({"patient_user_id": user["id"]})
