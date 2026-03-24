@@ -37,14 +37,14 @@ export default function RegisterScreen() {
     try {
       if (role === 'doctor') {
         await registerDoctor({ name, email, password, specialty: specialty || 'General Medicine', license_number: license });
-        router.replace('/(doctor-tabs)/dashboard');
       } else if (role === 'patient') {
         await registerPatient({ name, email, password, age: parseInt(age), gender, phone, blood_group: bloodGroup });
-        router.replace('/(patient-tabs)/home');
       } else {
         await registerAdmin({ name, email, password, department: department || 'Administration' });
-        router.replace('/(admin-tabs)/overview');
       }
+      // Navigate to index which handles role-based routing as single source of truth
+      // This avoids race conditions with auth state changes in Expo Go
+      router.replace('/');
     } catch (e: any) { setError(e.message || 'Registration failed'); }
     finally { setLoading(false); }
   };

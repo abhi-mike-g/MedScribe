@@ -26,9 +26,9 @@ export default function LoginScreen() {
     setLoading(true); setError('');
     try {
       await login(email, password, role);
-      if (role === 'doctor') router.replace('/(doctor-tabs)/dashboard');
-      else if (role === 'patient') router.replace('/(patient-tabs)/home');
-      else router.replace('/(admin-tabs)/overview');
+      // Navigate to index which handles role-based routing as single source of truth
+      // This avoids race conditions with auth state changes in Expo Go
+      router.replace('/');
     } catch (e: any) { setError(e.message || 'Login failed'); }
     finally { setLoading(false); }
   };
