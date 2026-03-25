@@ -3,7 +3,6 @@
 Simplified Multilingual Audio Transcription API Test Suite
 Tests the languages API and multilingual functionality with budget-aware testing.
 """
-
 import requests
 import json
 import tempfile
