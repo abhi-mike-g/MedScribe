@@ -3,14 +3,18 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
+import { useLock } from '../../src/context/LockContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
 import { Stethoscope, Mail, Shield, Lock, LogOut, Briefcase, Award } from 'lucide-react-native';
+import SecuritySyncSettings from '../../src/components/SecuritySyncSettings';
 
 export default function DoctorSettings() {
   const { user, logout } = useAuth();
+  const { resetLockState } = useLock();
   const router = useRouter();
 
   const handleLogout = async () => {
+    await resetLockState();
     await logout();
     router.replace('/(auth)/login');
   };
@@ -51,19 +55,8 @@ export default function DoctorSettings() {
           ) : null}
         </View>
 
-        <Text style={s.sectionLabel}>SECURITY</Text>
-        <View style={s.infoCard}>
-          <View style={s.infoRow}>
-            <Lock size={16} color="#10B981" />
-            <Text style={s.infoLabel}>Encryption</Text>
-            <Text style={[s.infoValue, { color: '#10B981' }]}>AES-256-GCM</Text>
-          </View>
-          <View style={s.infoRow}>
-            <Shield size={16} color="#0033A0" />
-            <Text style={s.infoLabel}>Compliance</Text>
-            <Text style={s.infoValue}>HIPAA & GDPR</Text>
-          </View>
-        </View>
+        <Text style={s.sectionLabel}>SECURITY & SYNC</Text>
+        <SecuritySyncSettings />
 
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout}>
           <LogOut size={18} color={theme.error} />

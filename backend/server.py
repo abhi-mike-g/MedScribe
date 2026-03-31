@@ -29,6 +29,7 @@ from routes.e2ee_routes import router as e2ee_router
 from routes.attachment_routes import router as attachment_router
 from routes.report_routes import router as report_router
 from routes.admin_routes import router as admin_router
+from routes.sync_routes import router as sync_router
 
 # ============== INCLUDE ALL ROUTERS ==============
 # Order matters for path matching: specific paths before wildcards
@@ -42,6 +43,7 @@ api_router.include_router(e2ee_router)
 api_router.include_router(attachment_router)
 api_router.include_router(report_router)
 api_router.include_router(admin_router)
+api_router.include_router(sync_router)
 
 # ============== HEALTH CHECK ==============
 @api_router.get("/health")
