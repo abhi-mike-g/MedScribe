@@ -26,15 +26,15 @@ export default function LoginScreen() {
     setLoading(true); setError('');
     try {
       await login(email, password, role);
-      // Navigate directly to the role-specific dashboard (avoid double navigation through index)
+      // Navigate immediately — PIN setup modal will overlay the dashboard if needed
       const targets: Record<string, string> = {
         doctor: '/(doctor-tabs)/dashboard',
         patient: '/(patient-tabs)/home',
         admin: '/(admin-tabs)/overview',
       };
-      setTimeout(() => router.replace(targets[role] || '/'), 300);
-    } catch (e: any) { setError(e.message || 'Login failed'); }
-    finally { setLoading(false); }
+      router.replace(targets[role] || '/');
+    } catch (e: any) { setError(e.message || 'Login failed'); setLoading(false); }
+
   };
 
   const selectedRole = ROLES.find(r => r.key === role)!;

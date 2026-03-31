@@ -43,15 +43,14 @@ export default function RegisterScreen() {
       } else {
         await registerAdmin({ name, email, password, department: department || 'Administration' });
       }
-      // Navigate directly to the role-specific dashboard (avoid double navigation)
+      // Navigate immediately — PIN setup modal will overlay the dashboard if needed
       const targets: Record<string, string> = {
         doctor: '/(doctor-tabs)/dashboard',
         patient: '/(patient-tabs)/home',
         admin: '/(admin-tabs)/overview',
       };
-      setTimeout(() => router.replace(targets[role] || '/'), 300);
-    } catch (e: any) { setError(e.message || 'Registration failed'); }
-    finally { setLoading(false); }
+      router.replace(targets[role] || '/');
+    } catch (e: any) { setError(e.message || 'Registration failed'); setLoading(false); }
   };
 
   const sel = ROLES.find(r => r.key === role)!;
