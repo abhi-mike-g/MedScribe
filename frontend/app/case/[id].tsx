@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
 import { ChevronLeft, Lock, Activity, Clock, User, FileText, MessageSquare } from 'lucide-react-native';
+import AttachmentsSection from '../../src/components/AttachmentsSection';
 
 export default function CaseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -118,6 +119,12 @@ export default function CaseDetailScreen() {
             <Text style={s.respondedAt}>Responded: {new Date(dr.responded_at).toLocaleString()}</Text>
           </View>
         )}
+
+        {/* E2EE Attachments Section */}
+        <AttachmentsSection
+          caseId={caseData.id}
+          canUpload={true}
+        />
 
         {/* Doctor Action: Respond to Case */}
         {isDoctor && caseData.status === 'pending' && (

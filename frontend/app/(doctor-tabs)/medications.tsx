@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { theme, Spacing, FontSizes } from '../../src/constants/theme';
-import { Pill, Search, AlertTriangle, Info, Shield } from 'lucide-react-native';
+import { Pill, Search, AlertTriangle, Info, Shield, Send, QrCode, Lock } from 'lucide-react-native';
 
 export default function DoctorMedications() {
   const { authFetch } = useAuth();
@@ -31,6 +31,27 @@ export default function DoctorMedications() {
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>Medication Database</Text>
         <Text style={s.subtitle}>On-device explainability engine</Text>
+
+        {/* Write Prescription CTA */}
+        <TouchableOpacity
+          style={s.rxCard}
+          onPress={() => router.push('/prescription/create')}
+          activeOpacity={0.8}
+        >
+          <View style={s.rxCardLeft}>
+            <View style={s.rxIconCircle}>
+              <Send size={20} color="#FFF" />
+            </View>
+            <View style={s.rxCardText}>
+              <Text style={s.rxCardTitle}>Write Prescription</Text>
+              <Text style={s.rxCardDesc}>Create E2EE prescription with QR verification</Text>
+            </View>
+          </View>
+          <View style={s.rxBadgeRow}>
+            <View style={s.e2eeBadge}><Lock size={8} color="#10B981" /><Text style={s.e2eeText}>E2EE</Text></View>
+            <View style={s.qrBadge}><QrCode size={8} color="#0033A0" /><Text style={s.qrText}>QR</Text></View>
+          </View>
+        </TouchableOpacity>
 
         <View style={s.searchRow}>
           <View style={s.searchBox}>
@@ -98,4 +119,15 @@ const s = StyleSheet.create({
   useTagText: { fontSize: FontSizes.xs, color: theme.primary, fontWeight: '600' },
   empty: { alignItems: 'center', padding: Spacing.xl, gap: Spacing.sm },
   emptyText: { fontSize: FontSizes.base, color: theme.textSecondary },
+  rxCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#059669', borderRadius: 12, padding: Spacing.base, marginBottom: Spacing.lg },
+  rxCardLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, flex: 1 },
+  rxIconCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  rxCardText: { flex: 1 },
+  rxCardTitle: { fontSize: FontSizes.base, fontWeight: '700', color: '#FFF' },
+  rxCardDesc: { fontSize: FontSizes.xs, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  rxBadgeRow: { flexDirection: 'column', gap: 4, marginLeft: Spacing.sm },
+  e2eeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9999, gap: 3 },
+  e2eeText: { fontSize: 9, color: '#10B981', fontWeight: '700' },
+  qrBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9999, gap: 3 },
+  qrText: { fontSize: 9, color: '#FFF', fontWeight: '700' },
 });

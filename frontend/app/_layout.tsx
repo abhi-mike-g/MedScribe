@@ -18,6 +18,7 @@ export default function RootLayout() {
         <Stack.Screen name="medication/[name]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="report/generate" options={{ presentation: 'modal' }} />
         <Stack.Screen name="report/[id]" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="prescription/create" options={{ presentation: 'modal' }} />
       </Stack>
     </AuthProvider>
   );

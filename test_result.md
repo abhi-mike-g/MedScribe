@@ -508,6 +508,54 @@ frontend:
         agent: "testing"
         comment: "✅ TESTED: Encrypted attachment upload working correctly. Accepts encrypted files, stores metadata, links to cases, maintains encryption integrity."
 
+  - task: "Prescription Creation Endpoint"
+    implemented: true
+    working: true
+    file: "server.py, prescription_generator.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/prescriptions/create - Doctor creates prescription with QR code. Tested in previous fork."
+      - working: true
+        agent: "main"
+        comment: "Route reordering done: /attachments/case/{case_id} now before /attachments/{attachment_id} to fix routing conflicts."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Prescription creation endpoint working correctly. Doctor can create prescriptions with patient_id, diagnosis, medications (list format), warnings (list format), and other fields. PDF generation working - produces valid 19KB+ PDF files with proper content-type headers. Prescription verification and download endpoints functional."
+
+  - task: "Attachment Route Ordering Fix"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Reordered attachment routes: POST upload → GET case/{case_id} → GET {id}/download → GET {id}. The /attachments/case/{case_id} must come before /attachments/{attachment_id} to avoid FastAPI matching 'case' as an attachment_id."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Attachment route ordering fix working correctly. GET /api/attachments/case/{case_id} returns proper list response (empty and with data), route precedence working as expected. No conflicts with /attachments/{attachment_id} route."
+
+  - task: "E2EE File Upload and Retrieval Full Flow"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Full flow: upload encrypted attachment → list case attachments → download attachment. Frontend AttachmentsSection component created. Backend routes fixed for correct ordering."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Complete E2EE file upload and retrieval flow working perfectly. Full test sequence: doctor/patient registration → case creation → encrypted file upload (multipart form with encrypted_data, case_id, file_name, file_type, iv, sender_id) → list case attachments → download with proper headers (Content-Type: application/octet-stream, X-Encryption-Method: AES-256-GCM, X-Encryption-IV). Access control verified - patients can access their own case attachments, doctors can see all case attachments. All encryption metadata preserved correctly."
+
   - task: "Health Check Endpoint"
     implemented: true
     working: true
@@ -582,3 +630,7 @@ agent_communication:
     message: "✅ MULTILINGUAL AUDIO TRANSCRIPTION TESTING COMPLETE: All 6 multilingual tests passed successfully. Languages API (/api/languages) working correctly with auto, en, hi support. Audio transcription with language parameter functional. Text extraction endpoint structure validated (LLM integration working but budget-limited). Language validation working correctly. All multilingual features production-ready."
   - agent: "testing"
     message: "✅ MEDICAL REPORT GENERATION TESTING COMPLETE: All 14 comprehensive tests passed successfully. Complete SOAP workflow tested: doctor authentication, case retrieval, report generation with full medical data, PDF generation/download (valid PDFs with proper headers), report editing, sending to patients, patient access control, and RBAC verification. Key features working: report status transitions (draft→sent), patient can only access sent reports (not drafts), sent reports cannot be edited, PDF generation produces valid medical reports. All authentication and authorization controls working properly. Medical report feature is production-ready."
+  - agent: "main"
+    message: "NEW FORK: Completed Task 1 (Write Prescription button in medications.tsx). Now implementing Task 2 (E2EE File Transfer UI). Created AttachmentsSection component at /app/frontend/src/components/AttachmentsSection.tsx and integrated it into case/[id].tsx. Fixed critical backend route ordering bug: moved /attachments/case/{case_id} before /attachments/{attachment_id} to prevent routing conflicts. Tests needed: 1) Attachment route ordering (GET /api/attachments/case/{case_id} should return list), 2) Full upload + list + download flow, 3) Prescription create endpoint still working."
+  - agent: "testing"
+    message: "✅ ATTACHMENT ROUTES & E2EE FLOW TESTING COMPLETE: All 10 comprehensive tests passed successfully. Verified attachment route ordering fix - GET /api/attachments/case/{case_id} correctly returns list without conflicts with /attachments/{attachment_id}. Complete E2EE file upload flow tested: doctor/patient registration → case creation → encrypted file upload (multipart form with encrypted_data, case_id, file_name, file_type, iv, sender_id) → list case attachments → download with proper encryption headers (X-Encryption-Method: AES-256-GCM, X-Encryption-IV). Access control working correctly. Prescription creation endpoint confirmed working with proper data format (warnings as list). PDF generation produces valid 19KB+ files. All newly modified endpoints are production-ready."

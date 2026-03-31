@@ -126,7 +126,13 @@ class RegisterDoctor(BaseModel):
     email: str
     password: str
     specialty: str = "General Medicine"
-    license_number: str = ""
+    license_number: str
+
+    @validator('license_number')
+    def validate_license(cls, v):
+        if not v or not re.match(r'^[A-Za-z0-9]{4,12}$', v):
+            raise ValueError('License number must be 4-12 alphanumeric characters')
+        return v
 
 class RegisterPatient(BaseModel):
     name: str
@@ -428,7 +434,108 @@ async def get_consultation(consultation_id: str, user=Depends(require_role("doct
         raise HTTPException(status_code=403, detail="Access denied")
     return doc
 
+from prescription_generator import generate_prescription_pdf as gen_rx_pdf, _compute_verification_hash
+
 # ============== PRESCRIPTION (accessible by patient + doctor) ==============
+
+class PrescriptionCreate(BaseModel):
+    """Doctor manually creates a prescription."""
+    patient_id: str  # PAT-XXXXXX
+    diagnosis: str = ""
+    icd_code: str = ""
+    medications: List[Dict[str, str]] = []  # [{name, dose, route, frequency, duration, instructions, plain_instructions}]
+    general_advice: str = ""
+    warnings: List[str] = []
+    follow_up_date: str = ""
+    tests_before_next_visit: str = ""
+    pharmacy_notes: str = ""
+    valid_days: int = 30
+
+@api_router.post("/prescriptions/create")
+async def create_prescription_manual(data: PrescriptionCreate, user=Depends(require_role("doctor"))):
+    """Doctor manually creates and sends a prescription to a patient."""
+    if not user.get("license_number"):
+        raise HTTPException(status_code=400, detail="A valid license number is required to issue prescriptions")
+
+    # Look up the patient
+    patient = await db.users.find_one({"patient_id": data.patient_id, "role": "patient"}, {"_id": 0})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    rx_id = f"RX-{str(uuid.uuid4())[:8].upper()}"
+    now = datetime.now(timezone.utc)
+    valid_until = (now + timedelta(days=data.valid_days)).strftime("%d %B %Y")
+
+    rx_doc = {
+        "id": rx_id,
+        "doctor_id": user["id"], "doctor_name": user["name"],
+        "doctor_specialty": user.get("specialty", ""), "doctor_license": user.get("license_number", ""),
+        "patient_id": data.patient_id, "patient_user_id": patient["id"],
+        "patient_name": patient["name"], "patient_age": patient.get("age", 0),
+        "patient_gender": patient.get("gender", ""),
+        "diagnosis": data.diagnosis, "icd_code": data.icd_code,
+        "medications": data.medications,
+        "general_advice": data.general_advice,
+        "warnings": data.warnings,
+        "follow_up_date": data.follow_up_date,
+        "tests_before_next_visit": data.tests_before_next_visit,
+        "pharmacy_notes": data.pharmacy_notes,
+        "instructions": "; ".join([m.get("instructions","") for m in data.medications if m.get("instructions")]),
+        "status": "sent",
+        "valid_until": valid_until,
+        "verification_hash": _compute_verification_hash(rx_id, user.get("license_number",""), user["name"]),
+        "created_at": now.isoformat(), "updated_at": now.isoformat(),
+        "encrypted": True, "encryption_status": "AES-256-GCM",
+    }
+    await db.prescriptions.insert_one(rx_doc)
+    return {k: v for k, v in rx_doc.items() if k != "_id"}
+
+
+@api_router.get("/prescriptions/verify/{rx_id}")
+async def verify_prescription(rx_id: str):
+    """Public endpoint for pharmacies to verify a prescription via QR code."""
+    rx = await db.prescriptions.find_one({"id": rx_id}, {"_id": 0})
+    if not rx:
+        return {"valid": False, "reason": "Prescription not found"}
+
+    # Check license exists in the system
+    doctor = await db.users.find_one({"id": rx["doctor_id"], "role": "doctor"}, {"_id": 0})
+    if not doctor:
+        return {"valid": False, "reason": "Prescribing doctor not found"}
+
+    license_valid = bool(doctor.get("license_number")) and doctor["license_number"] == rx.get("doctor_license")
+    expected_hash = _compute_verification_hash(rx_id, rx.get("doctor_license",""), rx.get("doctor_name",""))
+    hash_valid = rx.get("verification_hash") == expected_hash
+
+    # Check validity period
+    valid_until_str = rx.get("valid_until", "")
+    expired = False
+    try:
+        valid_dt = datetime.strptime(valid_until_str, "%d %B %Y").replace(tzinfo=timezone.utc)
+        expired = datetime.now(timezone.utc) > valid_dt
+    except (ValueError, TypeError):
+        pass
+
+    is_valid = license_valid and hash_valid and not expired
+    return {
+        "valid": is_valid,
+        "prescription_id": rx_id,
+        "doctor_name": rx.get("doctor_name", ""),
+        "doctor_license": rx.get("doctor_license", ""),
+        "license_verified": license_valid,
+        "hash_verified": hash_valid,
+        "expired": expired,
+        "valid_until": valid_until_str,
+        "patient_name": rx.get("patient_name", ""),
+        "patient_id": rx.get("patient_id", ""),
+        "diagnosis": rx.get("diagnosis", ""),
+        "medication_count": len(rx.get("medications", [])),
+        "created_at": rx.get("created_at", ""),
+        "encrypted": True,
+        "reason": "Valid prescription from authorized physician" if is_valid else
+                  ("Expired" if expired else "License verification failed" if not license_valid else "Hash mismatch"),
+    }
+
 
 @api_router.get("/prescriptions")
 async def get_prescriptions(user=Depends(get_current_user)):
@@ -458,44 +565,47 @@ async def get_prescription_pdf(rx_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Prescription not found")
     if user["role"] == "patient" and rx["patient_id"] != user.get("patient_id", ""):
         raise HTTPException(status_code=403, detail="Access denied")
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
-    styles = getSampleStyleSheet()
-    story = []
-    hs = ParagraphStyle('H', parent=styles['Title'], fontSize=18, textColor=colors.HexColor('#0033A0'), spaceAfter=4)
-    story.append(Paragraph("MedScribe Prescription", hs))
-    story.append(Paragraph(f"<b>Dr. {rx.get('doctor_name','N/A')}</b> — {rx.get('doctor_specialty','')}", styles['Normal']))
-    story.append(Paragraph(f"License: {rx.get('doctor_license','N/A')}", styles['Normal']))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#0033A0')))
-    story.append(Spacer(1,12))
-    story.append(Paragraph(f"<b>Patient:</b> {rx.get('patient_name','N/A')} | <b>ID:</b> {rx.get('patient_id','N/A')}", styles['Normal']))
-    story.append(Paragraph(f"<b>Age:</b> {rx.get('patient_age','N/A')} | <b>Gender:</b> {rx.get('patient_gender','N/A')}", styles['Normal']))
-    story.append(Paragraph(f"<b>Date:</b> {rx.get('created_at','')[:10]}", styles['Normal']))
-    story.append(Spacer(1,12))
-    story.append(Paragraph(f"<b>Diagnosis:</b> {rx.get('diagnosis','N/A')}", styles['Heading3']))
-    story.append(Spacer(1,8))
-    meds = rx.get("medications", [])
-    if meds:
-        td = [["#","Medication","Dosage","Frequency","Duration"]]
-        for i, m in enumerate(meds, 1):
-            td.append([str(i), m.get("name",""), m.get("dosage",""), m.get("frequency",""), m.get("duration","")])
-        t = Table(td, colWidths=[30,150,100,100,100])
-        t.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#0033A0')),('TEXTCOLOR',(0,0),(-1,0),colors.white),
-            ('ALIGN',(0,0),(-1,-1),'LEFT'),('FONTSIZE',(0,0),(-1,-1),10),('BOTTOMPADDING',(0,0),(-1,0),8),
-            ('GRID',(0,0),(-1,-1),0.5,colors.grey),
-            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F0F4FF')]),
-        ]))
-        story.append(t); story.append(Spacer(1,12))
-    if rx.get("instructions"):
-        story.append(Paragraph(f"<b>Instructions:</b> {rx['instructions']}", styles['Normal']))
-    if rx.get("follow_up_date"):
-        story.append(Spacer(1,8)); story.append(Paragraph(f"<b>Follow-up:</b> {rx['follow_up_date']}", styles['Normal']))
-    story.append(Spacer(1,24))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
-    story.append(Paragraph("End-to-End Encrypted | HIPAA Compliant | Principle of Least Privilege", ParagraphStyle('F', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
-    doc.build(story); buf.seek(0)
-    return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=rx_{rx_id[:8]}.pdf"})
+    if user["role"] == "doctor" and rx["doctor_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Build data for the new template-matching PDF generator
+    pdf_data = {
+        "rx_id": rx["id"],
+        "created_at": rx.get("created_at", "")[:10] if rx.get("created_at") else "",
+        "valid_until": rx.get("valid_until", ""),
+        "patient": {
+            "name": rx.get("patient_name", "N/A"),
+            "age": rx.get("patient_age", ""),
+            "gender": rx.get("patient_gender", ""),
+            "id": rx.get("patient_id", ""),
+            "weight": rx.get("patient_weight", "N/A"),
+            "allergies": rx.get("patient_allergies", "NKDA"),
+        },
+        "doctor": {
+            "name": rx.get("doctor_name", ""),
+            "specialization": rx.get("doctor_specialty", ""),
+            "registration_no": rx.get("doctor_license", ""),
+            "contact": "",
+        },
+        "diagnosis": rx.get("diagnosis", ""),
+        "icd_code": rx.get("icd_code", ""),
+        "medications": rx.get("medications", []),
+        "general_advice": rx.get("general_advice", rx.get("instructions", "")),
+        "warnings": rx.get("warnings", []),
+        "follow_up_date": rx.get("follow_up_date", ""),
+        "tests_before_next_visit": rx.get("tests_before_next_visit", ""),
+        "pharmacy_notes": rx.get("pharmacy_notes", ""),
+    }
+
+    pdf_bytes = gen_rx_pdf(pdf_data)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="MedScribe_Rx_{rx_id}.pdf"',
+            "X-Encryption-Status": "AES-256-GCM",
+        },
+    )
 
 # ============== MEDICATION DB ==============
 
@@ -896,21 +1006,21 @@ async def upload_encrypted_attachment(
         "encryption_method": "AES-256-GCM",
     }
 
-@api_router.get("/attachments/{attachment_id}")
-async def get_attachment_metadata(attachment_id: str, user=Depends(get_current_user)):
-    """Get metadata for an encrypted attachment (not the file itself)."""
-    att = await db.attachments.find_one({"id": attachment_id}, {"_id": 0, "storage_path": 0})
-    if not att:
-        raise HTTPException(status_code=404, detail="Attachment not found")
-    # Access control
-    case = await db.cases.find_one({"id": att["case_id"]}, {"_id": 0})
+# IMPORTANT: /attachments/case/{case_id} must be registered BEFORE /attachments/{attachment_id}
+# to avoid FastAPI matching "case" as an attachment_id
+@api_router.get("/attachments/case/{case_id}")
+async def get_case_attachments(case_id: str, user=Depends(get_current_user)):
+    """List all encrypted attachments for a case."""
+    case = await db.cases.find_one({"id": case_id}, {"_id": 0})
     if not case:
-        raise HTTPException(status_code=404, detail="Associated case not found")
+        raise HTTPException(status_code=404, detail="Case not found")
     if user["role"] == "patient" and case.get("patient_user_id") != user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    if user["role"] == "doctor" and case.get("assigned_doctor_id") and case["assigned_doctor_id"] != user["id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return att
+    attachments = await db.attachments.find(
+        {"case_id": case_id},
+        {"_id": 0, "storage_path": 0}
+    ).sort("created_at", -1).to_list(50)
+    return attachments
 
 @api_router.get("/attachments/{attachment_id}/download")
 async def download_encrypted_attachment(attachment_id: str, user=Depends(get_current_user)):
@@ -939,19 +1049,21 @@ async def download_encrypted_attachment(attachment_id: str, user=Depends(get_cur
         }
     )
 
-@api_router.get("/attachments/case/{case_id}")
-async def get_case_attachments(case_id: str, user=Depends(get_current_user)):
-    """List all encrypted attachments for a case."""
-    case = await db.cases.find_one({"id": case_id}, {"_id": 0})
+@api_router.get("/attachments/{attachment_id}")
+async def get_attachment_metadata(attachment_id: str, user=Depends(get_current_user)):
+    """Get metadata for an encrypted attachment (not the file itself)."""
+    att = await db.attachments.find_one({"id": attachment_id}, {"_id": 0, "storage_path": 0})
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    # Access control
+    case = await db.cases.find_one({"id": att["case_id"]}, {"_id": 0})
     if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+        raise HTTPException(status_code=404, detail="Associated case not found")
     if user["role"] == "patient" and case.get("patient_user_id") != user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    attachments = await db.attachments.find(
-        {"case_id": case_id},
-        {"_id": 0, "storage_path": 0}
-    ).sort("created_at", -1).to_list(50)
-    return attachments
+    if user["role"] == "doctor" and case.get("assigned_doctor_id") and case["assigned_doctor_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return att
 from report_generator import generate_medical_report_pdf
 
 # ============== MEDICAL REPORT ENDPOINTS ==============

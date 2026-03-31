@@ -31,6 +31,7 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!name || !email || !password) { setError('Name, email and password are required'); return; }
+    if (role === 'doctor' && (!license || !/^[A-Za-z0-9]{4,12}$/.test(license))) { setError('License number is required (4-12 alphanumeric characters)'); return; }
     if (role === 'patient' && !/^[A-Za-z\s.\-]+$/.test(name)) { setError('Name must contain only letters'); return; }
     if (role === 'patient' && (!age || isNaN(Number(age)))) { setError('Age must be a valid number'); return; }
     setLoading(true); setError('');
@@ -82,7 +83,7 @@ export default function RegisterScreen() {
           {role === 'doctor' && (
             <>
               <InputField testID="reg-specialty" label="SPECIALTY" value={specialty} onChangeText={setSpecialty} placeholder="e.g. General Medicine" />
-              <InputField testID="reg-license" label="LICENSE NUMBER" value={license} onChangeText={setLicense} placeholder="Medical license" />
+              <InputField testID="reg-license" label="LICENSE NUMBER *" value={license} onChangeText={setLicense} placeholder="4-12 alphanumeric (required)" />
             </>
           )}
 
