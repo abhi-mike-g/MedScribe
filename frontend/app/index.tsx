@@ -10,10 +10,12 @@ export default function Index() {
   const rootNavigationState = useRootNavigationState();
 
   useEffect(() => {
-    // Wait for navigation to be fully ready before any routing
+    // Wait for navigation to be fully ready
     if (!rootNavigationState?.key) return;
     if (loading) return;
 
+    // Navigate even during PIN setup — the overlay handles security
+    // This ensures navigation state is properly initialized for StackRouter
     if (user) {
       if (user.role === 'doctor') router.replace('/(doctor-tabs)/dashboard');
       else if (user.role === 'patient') router.replace('/(patient-tabs)/home');

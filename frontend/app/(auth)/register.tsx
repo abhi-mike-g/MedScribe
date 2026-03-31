@@ -43,9 +43,13 @@ export default function RegisterScreen() {
       } else {
         await registerAdmin({ name, email, password, department: department || 'Administration' });
       }
-      // Navigate to index which handles role-based routing as single source of truth
-      // This avoids race conditions with auth state changes in Expo Go
-      router.replace('/');
+      // Navigate directly to the role-specific dashboard (avoid double navigation)
+      const targets: Record<string, string> = {
+        doctor: '/(doctor-tabs)/dashboard',
+        patient: '/(patient-tabs)/home',
+        admin: '/(admin-tabs)/overview',
+      };
+      setTimeout(() => router.replace(targets[role] || '/'), 300);
     } catch (e: any) { setError(e.message || 'Registration failed'); }
     finally { setLoading(false); }
   };

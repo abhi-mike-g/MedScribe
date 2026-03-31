@@ -162,8 +162,11 @@ export function LockProvider({ children, isAuthenticated }: { children: React.Re
       } else {
         await SecureStore.setItemAsync(PIN_KEY, hashed);
       }
-      setHasPinSetup(true);
-      setIsLocked(false);
+      // Defer state updates to avoid race condition with navigation rehydration
+      setTimeout(() => {
+        setHasPinSetup(true);
+        setIsLocked(false);
+      }, 150);
     } catch (e) {
       console.error('PIN setup error:', e);
       throw e;
@@ -226,7 +229,10 @@ export function LockProvider({ children, isAuthenticated }: { children: React.Re
   }, []);
 
   const unlock = useCallback(() => {
-    setIsLocked(false);
+    // Defer unlock to allow navigation state to stabilize
+    setTimeout(() => {
+      setIsLocked(false);
+    }, 100);
   }, []);
 
   const lockApp = useCallback(() => {
