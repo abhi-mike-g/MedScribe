@@ -65,6 +65,7 @@ export default function DoctorRecordScreen() {
   const [consultationType, setConsultationType] = useState('general');
   const [doctorNotes, setDoctorNotes] = useState('');
   const [showTypePickerModal, setShowTypePickerModal] = useState(false);
+  const [savedConsultationId, setSavedConsultationId] = useState<string | null>(null);
 
   // Language selection
   const [languages, setLanguages] = useState<LanguageOption[]>([
@@ -342,6 +343,8 @@ export default function DoctorRecordScreen() {
         }),
       });
       if (res.ok) {
+        const data = await res.json();
+        setSavedConsultationId(data.id);
         setStep('done');
       } else {
         const e = await res.json();
@@ -828,8 +831,16 @@ export default function DoctorRecordScreen() {
                 Your clinic visit notes have been saved with the AI-extracted clinical data.
                 {patientId ? ` Linked to patient ${patientId}.` : ''}
               </Text>
-              <TouchableOpacity style={st.viewCasesBtn} onPress={() => router.push('/(doctor-tabs)/cases')}>
-                <Text style={st.viewCasesBtnText}>View Cases</Text>
+              <TouchableOpacity style={st.viewCasesBtn} onPress={() => router.push({
+                pathname: '/report/generate',
+                params: { sourceType: 'consultation', sourceId: savedConsultationId || '' },
+              })}>
+                <FileText size={18} color="#FFF" />
+                <Text style={st.viewCasesBtnText}>Generate Medical Report</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={st.newCaseBtn} onPress={() => router.push('/(doctor-tabs)/cases')}>
+                <ClipboardList size={16} color="#0033A0" />
+                <Text style={st.newCaseText}>View Cases</Text>
               </TouchableOpacity>
               <TouchableOpacity style={st.newCaseBtn} onPress={resetForm}>
                 <Mic size={16} color="#0033A0" />
@@ -965,7 +976,7 @@ const st = StyleSheet.create({
   doneContainer: { alignItems: 'center', paddingVertical: Spacing.xxxl },
   doneTitle: { fontSize: FontSizes.xxl, fontWeight: '800', color: theme.textPrimary, marginTop: Spacing.lg },
   doneDesc: { fontSize: FontSizes.md, color: theme.textSecondary, textAlign: 'center', marginTop: Spacing.sm, lineHeight: 22, paddingHorizontal: Spacing.lg },
-  viewCasesBtn: { backgroundColor: '#0033A0', height: 52, borderRadius: 9999, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.xl, width: '100%' },
+  viewCasesBtn: { backgroundColor: '#0033A0', height: 52, borderRadius: 9999, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.xl, width: '100%', flexDirection: 'row', gap: 8 },
   viewCasesBtnText: { color: '#FFF', fontSize: FontSizes.base, fontWeight: '700' },
   newCaseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0033A0', height: 48, borderRadius: 9999, gap: 6, marginTop: Spacing.md, width: '100%' },
   newCaseText: { fontSize: FontSizes.base, color: '#0033A0', fontWeight: '600' },

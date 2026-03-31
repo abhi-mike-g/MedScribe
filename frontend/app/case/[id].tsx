@@ -135,6 +135,17 @@ export default function CaseDetailScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Doctor Action: Generate Medical Report */}
+        {isDoctor && (
+          <TouchableOpacity style={s.reportBtn} onPress={() => router.push({
+            pathname: '/report/generate',
+            params: { sourceType: 'case', sourceId: caseData.id },
+          })}>
+            <FileText size={18} color="#0033A0" />
+            <Text style={s.rxBtnText}>Generate Medical Report</Text>
+          </TouchableOpacity>
+        )}
+
         <View style={s.encryption}>
           <Lock size={12} color="#10B981" />
           <Text style={s.encryptionText}>End-to-End Encrypted \u2022 {caseData.encryption_status}</Text>
@@ -180,6 +191,7 @@ const s = StyleSheet.create({
   respondBtnText: { color: '#FFF', fontSize: FontSizes.base, fontWeight: '700' },
   rxBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0033A0', height: 48, borderRadius: 9999, gap: Spacing.sm, marginBottom: Spacing.md },
   rxBtnText: { fontSize: FontSizes.base, color: '#0033A0', fontWeight: '600' },
+  reportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0033A0', backgroundColor: '#E8EEFF', height: 48, borderRadius: 9999, gap: Spacing.sm, marginBottom: Spacing.md },
   encryption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: Spacing.lg },
   encryptionText: { fontSize: FontSizes.sm, color: theme.textSecondary },
 });

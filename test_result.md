@@ -559,6 +559,18 @@ frontend:
         agent: "testing"
         comment: "✅ TESTED: POST /api/audio/extract-from-text endpoint working correctly. Accepts transcript and language parameters, processes multilingual medical text extraction. Note: LLM integration functional but budget-limited during testing."
 
+  - task: "Medical Report Generation - Complete SOAP Workflow"
+    implemented: true
+    working: true
+    file: "server.py, report_generator.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Complete medical report generation workflow tested successfully. All 14 test scenarios passed: doctor login, case retrieval, report generation with full SOAP data, PDF generation/download, report editing, sending to patient, patient access control, RBAC verification. PDF generation produces valid PDFs with proper content-type headers. Report status transitions (draft→sent) working correctly. Patient can only access sent reports, not drafts. Sent reports cannot be edited. All authentication and authorization controls working properly."
+
 agent_communication:
   - agent: "main"
     message: "Completed full multi-role frontend rebuild. Created (patient-tabs) with 5 screens, (admin-tabs) with 3 screens, and completed (doctor-tabs) with 5 screens. Fixed stale token bug in AuthContext using useRef. Removed orphaned MVP files. Backend was already complete from previous fork. All API endpoints need testing."
@@ -568,3 +580,5 @@ agent_communication:
     message: "✅ NEW ENDPOINTS TESTING COMPLETE: All 8 new audio transcription and E2EE endpoints tested successfully. Audio transcription with Whisper model working (correctly detects no speech in test audio), LLM extraction producing structured medical data, E2EE key management functional, encrypted file uploads working. All endpoints production-ready."
   - agent: "testing"
     message: "✅ MULTILINGUAL AUDIO TRANSCRIPTION TESTING COMPLETE: All 6 multilingual tests passed successfully. Languages API (/api/languages) working correctly with auto, en, hi support. Audio transcription with language parameter functional. Text extraction endpoint structure validated (LLM integration working but budget-limited). Language validation working correctly. All multilingual features production-ready."
+  - agent: "testing"
+    message: "✅ MEDICAL REPORT GENERATION TESTING COMPLETE: All 14 comprehensive tests passed successfully. Complete SOAP workflow tested: doctor authentication, case retrieval, report generation with full medical data, PDF generation/download (valid PDFs with proper headers), report editing, sending to patients, patient access control, and RBAC verification. Key features working: report status transitions (draft→sent), patient can only access sent reports (not drafts), sent reports cannot be edited, PDF generation produces valid medical reports. All authentication and authorization controls working properly. Medical report feature is production-ready."
