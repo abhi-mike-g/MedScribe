@@ -5,10 +5,19 @@ MedScribe is an end-to-end encrypted, local-first mobile application for doctor-
 
 ## Architecture
 - **Frontend**: Expo React Native with expo-router (file-based routing)
-- **Backend**: FastAPI with MongoDB
+- **Backend**: FastAPI with MongoDB (modular architecture)
+  - `server.py` — App entry point (~60 lines)
+  - `routes/` — 10 route modules (auth, cases, doctor, prescriptions, medications, audio, e2ee, attachments, reports, admin)
+  - `models/schemas.py` — All Pydantic request/response schemas
+  - `services/` — Whisper STT, LLM extraction
+  - `config.py` — Constants, language config, medication DB
+  - `auth.py` — JWT auth, password hashing, role guards
+  - `db.py` — MongoDB connection
 - **Auth**: Custom JWT (multi-role: doctor, patient, admin)
-- **AI**: On-device bridges (Whisper-CPP for STT, Phi-3 for LLM) - mocked for web preview
-- **Recording**: expo-audio (migrated from expo-av)
+- **AI**: faster-whisper (base model) for STT, GPT-4.1-mini via Emergent LLM Key for medical extraction
+- **Recording**: expo-audio
+- **PDF Generation**: reportlab (Medical Reports), qrcode+reportlab (Prescriptions with QR)
+- **E2EE**: AES-256-GCM encryption for file transfers, key exchange via RSA
 
 ## Roles & Portals
 
