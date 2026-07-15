@@ -62,40 +62,40 @@ MedScribe is a production-ready mobile application designed for doctor-patient i
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Mobile App (Expo)                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
-│  │  Doctor   │  │ Patient  │  │     Admin        │   │
-│  │  Portal   │  │  Portal  │  │     Portal       │   │
-│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
-│       │              │                 │              │
-│  ┌────┴──────────────┴─────────────────┴──────────┐  │
-│  │           Expo Router (File-based)              │  │
+┌────────────────────────────────────────────────────────┐
+│                   Mobile App (Expo)                    │
+│  ┌───────────┐  ┌───────────┐  ┌───────────────────┐   │
+│  │  Doctor   │  │ Patient   │  │     Admin         │   │
+│  │  Portal   │  │  Portal   │  │     Portal        │   │
+│  └────┬──────┘  └────┬──────┘  └────────┬──────────┘   │
+│       │              │                 │               │
+│  ┌────┴────────────────┴─────────────────┴──────────┐  │
+│  │           Expo Router (File-based)               │  │
 │  │     AuthContext (JWT + AsyncStorage)             │  │
-│  │     expo-audio · expo-file-system · E2EE        │  │
-│  └──────────────────────┬──────────────────────────┘  │
-└─────────────────────────┼─────────────────────────────┘
+│  │     expo-audio · expo-file-system · E2EE         │  │
+│  └──────────────────────┬───────────────────────────┘  │
+└─────────────────────────┼──────────────────────────────┘
                           │ HTTPS
-┌─────────────────────────┼─────────────────────────────┐
+┌─────────────────────────┼───────────────────────────────┐
 │                  Backend (FastAPI)                      │
-│  ┌──────────────────────┴──────────────────────────┐  │
+│  ┌──────────────────────┴────────────────────────────┐  │
 │  │                 API Router (/api/*)               │  │
-│  ├──────────┬──────────┬───────────┬───────────────┤  │
-│  │   Auth   │  Cases   │   Audio   │     E2EE      │  │
-│  │ Register │  Submit  │Transcribe │  Key Exchange  │  │
-│  │  Login   │ Respond  │ Extract   │  Attachments   │  │
-│  │   RBAC   │  Query   │  Whisper  │  Encrypted FS  │  │
-│  ├──────────┼──────────┼───────────┼───────────────┤  │
-│  │ Consult  │    Rx    │ Languages │    Admin       │  │
-│  │  Notes   │   PDF    │  Config   │    Stats       │  │
-│  └──────────┴──────────┴───────────┴───────────────┘  │
-│       │              │                                 │
-│  ┌────┴──────┐  ┌────┴──────┐                         │
-│  │  Whisper  │  │ GPT-4.1   │                         │
-│  │  (base)   │  │   mini    │                         │
-│  │faster-whi │  │ via LiteLLM│                        │
-│  └───────────┘  └───────────┘                         │
-└───────────────────────┬───────────────────────────────┘
+│  ├──────────┬──────────┬───────────┬─────────────────┤  │
+│  │   Auth   │  Cases   │   Audio   │     E2EE        │  │
+│  │ Register │  Submit  │Transcribe │  Key Exchange   │  │
+│  │  Login   │ Respond  │ Extract   │  Attachments    │  │
+│  │   RBAC   │  Query   │  Whisper  │  Encrypted FS   │  │
+│  ├──────────┼──────────┼───────────┼─────────────────┤  │
+│  │ Consult  │    Rx    │ Languages │    Admin        │  │
+│  │  Notes   │   PDF    │  Config   │    Stats        │  │
+│  └──────────┴──────────┴───────────┴─────────────────┘  │
+│       │              │                                  │
+│  ┌────┴──────┐  ┌────┴───────┐                          │
+│  │  Whisper  │  │ GPT-4.1    │                          │
+│  │  (base)   │  │   mini     │                          │
+│  │faster-whi │  │ via LiteLLM│                          │
+│  └───────────┘  └────────────┘                          │
+└───────────────────────┬─────────────────────────────────┘
                         │
               ┌─────────┴─────────┐
               │     MongoDB       │
@@ -342,23 +342,23 @@ npx expo start
 
 ```
 Patient Device                    Server                     Doctor Device
-     │                              │                              │
-     │  ┌─────────────────┐         │                              │
+     │                               │                              │
+     │  ┌──────────────────┐         │                              │
      │  │ expo-secure-store│         │                              │
      │  │ (Android Keystore│         │                              │
      │  │  / iOS Keychain) │         │                              │
-     │  └────────┬────────┘         │                              │
+     │  └─────────┬────────┘         │                              │
      │           │                   │                              │
      │  Generate RSA keypair         │                              │
      │──── Register public key ─────>│                              │
-     │                               │<──── Register public key ───│
+     │                               │<──── Register public key ────│
      │                               │                              │
      │  Encrypt data with            │                              │
      │  AES-256-GCM session key      │    Decrypt with              │
-     │──── Upload encrypted ────────>│───── private key ──────────>│
+     │──── Upload encrypted ────────>│───── private key ───────────>│
      │                               │                              │
      │  All data at rest:            │                              │
-     │  AES-256-GCM encrypted       │                              │
+     │  AES-256-GCM encrypted        │                              │
      └───────────────────────────────┴──────────────────────────────┘
 ```
 
